@@ -51,6 +51,84 @@ SSL_CERT_MODE_MANUAL = "manual"
 RESTART_SCRIPT = "/var/packages/TorrServer/scripts/restart-package"
 CERTIFICATE_HELPER = "/var/packages/TorrServer/scripts/certificate-helper"
 
+LOCALE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locales")
+LANGUAGE_FILE = os.path.join(PACKAGE_VAR, "helper.language")
+SUPPORTED_LANGUAGES = ("en", "ru", "lt", "pl")
+LANGUAGE_NAMES = {
+    "en": "English",
+    "ru": "Русский",
+    "lt": "Lietuvių",
+    "pl": "Polski",
+}
+
+
+def get_language():
+    value = read_file(LANGUAGE_FILE, "en").strip().lower()
+    return value if value in SUPPORTED_LANGUAGES else "en"
+
+
+def set_language(language):
+    language = str(language or "").strip().lower()
+    if language not in SUPPORTED_LANGUAGES:
+        return False
+    write_file(LANGUAGE_FILE, language)
+    return True
+
+
+def load_locale(language=None):
+    language = language or get_language()
+    path = os.path.join(LOCALE_DIR, language + ".json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def localize_html(content):
+    translations = load_locale()
+    if not translations:
+        return content
+
+    # Locale files use English source strings as keys. Replace only textual
+    # strings; URLs, paths and program identifiers are intentionally untouched.
+    for source, translated in translations.items():
+        if source and source != translated:
+            content = content.replace(source, str(translated))
+    return content
+
+
+def language_selector():
+    current = get_language()
+    options = []
+    for code in SUPPORTED_LANGUAGES:
+        selected = " selected" if code == current else ""
+        options.append(
+            '<option value="{}"{}>{}</option>'.format(
+                code, selected, html.escape(LANGUAGE_NAMES[code])
+            )
+        )
+
+    return """
+<div class="settings-card">
+    <div class="settings-card-title">
+        <span class="metric-icon">文</span>
+        <span>Language</span>
+    </div>
+    <div class="settings-card-body">
+        <form method="post" action="./language">
+            <div class="form-row">
+                <label for="language">Language</label>
+                <select id="language" name="language" onchange="this.form.submit()">
+                    {}
+                </select>
+            </div>
+        </form>
+    </div>
+</div>
+""".format("".join(options))
+
 
 def read_file(path, default=""):
     try:
@@ -1945,7 +2023,7 @@ def main_page(host):
     )
 
     body += page_footer()
-    return body
+    return localize_html(body)
 
 
 def settings_page(message="", cache_path_override=""):
@@ -1978,12 +2056,14 @@ def settings_page(message="", cache_path_override=""):
 
 <div class="app-title">Settings</div>
 
+{language_selector}
+
 <div class="notice">
 <strong>After changing settings:</strong> first click <b>Save</b>, then click <b>Restart</b>.
 <br>
 Some changes require a restart of the TorrServer service to take effect.
 </div>
-""".format(sidebar=app_sidebar("settings"))
+""".format(sidebar=app_sidebar("settings"), language_selector=language_selector())
 
     if message:
         body += '<div class="notice">{}</div>'.format(html.escape(message))
@@ -2225,7 +2305,7 @@ toggleAuth();
     )
 
     body += page_footer()
-    return body
+    return localize_html(body)
 
 def cache_browser_path(path):
     """Return a safe cache-browser path under /volume* only."""
@@ -2321,7 +2401,7 @@ def cache_browser_page(path):
     )
 
     body += page_footer()
-    return body
+    return localize_html(body)
 
 def logs_page():
     body = page_header("TorrServer Logs")
@@ -2392,7 +2472,7 @@ window.addEventListener("load", openLog);
 """.format(sidebar=app_sidebar("logs"))
 
     body += page_footer()
-    return body
+    return localize_html(body)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2519,6 +2599,14 @@ class Handler(BaseHTTPRequestHandler):
 
         params = parse_qs(body)
 
+        if path == "/language":
+            language = params.get("language", ["en"])[0]
+            if set_language(language):
+                self.redirect("./settings")
+            else:
+                self.send_html(settings_page("Invalid language"), 400)
+            return
+
         if path == "/settings":
             ok, message = save_settings(params)
 
@@ -2536,14 +2624,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.redirect("./")
             else:
                 self.send_html(
-                    page_header("Restart Error")
-                    + """
+                    localize_html(
+                        page_header("Restart Error")
+                        + """
 <div class="card">
 <h1>Restart failed</h1>
 <p>{}</p>
 </div>
 """.format(html.escape(message))
-                    + page_footer(),
+                        + page_footer()
+                    ),
                     500,
                 )
 

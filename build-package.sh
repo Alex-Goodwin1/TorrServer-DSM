@@ -81,8 +81,9 @@ make_inner_pkg() {
     mkdir -p ${tmp_dir}/systemd
     cp src/systemd/TorrServer-restart.service ${tmp_dir}/systemd/
     cp -r src/nginx ${tmp_dir}
-    mkdir -p ${tmp_dir}/helper
-    cp src/helper/helper.py ${tmp_dir}/helper/helper.py
+    rm -rf ${tmp_dir}/helper
+    cp -a src/helper ${tmp_dir}/helper
+    rm -rf ${tmp_dir}/helper/__pycache__
     chmod +x ${tmp_dir}/helper/helper.py
 
     pkg_size=$(du -sk "${tmp_dir}" | awk '{print $1}')
