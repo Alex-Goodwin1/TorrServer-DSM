@@ -1,0 +1,40 @@
+name: Build TorrServer DSM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build SPK packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            unzip \
+            xz-utils
+
+      - name: Build SPK packages
+        run: |
+          make
+
+      - name: List build results
+        run: |
+          echo "Built packages:"
+          find spk -maxdepth 1 -type f -name '*.spk' -print
+
+      - name: Upload SPK packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: TorrServer-DSM-${{ github.sha }}
+          path: spk/*.spk
+          if-no-files-found: error
