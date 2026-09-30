@@ -10,11 +10,12 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 
 ### Settings
 
-- Port configuration
-- HTTP / HTTPS
-- Force HTTPS
-- HTTP authentication
+- Port configuration for HTTP / HTTPS
 - TorrServer cache configuration
+- HTTPS
+- Force HTTPS
+- SSL certificate management
+- HTTP authentication
 - Logs and package status
 - Restart TorrServer from DSM
 
