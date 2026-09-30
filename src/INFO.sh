@@ -14,7 +14,7 @@ OS_MIN_VER="7.3-81180"
 case "${ARCH}" in
 
     amd64)
-        PLATFORMS="x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000"
+        PLATFORMS="x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000 v1000nk r1000nk geminilakenk icelaked epyc7003"
         ;;
 
     arm64)
