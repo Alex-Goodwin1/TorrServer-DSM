@@ -26,14 +26,6 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
   - `arm64`
   - `arm7`
 
-## Installation
-
-Install the `.spk` package through:
-
-**Package Center → Manual Install**
-
-After installation, open **TorrServer DSM** from the DSM desktop.
-
 ## Building
 
 Clone the repository:
