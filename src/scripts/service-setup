@@ -83,8 +83,8 @@ FIREWALL_PORTS="${FIREWALL_PORTS}/tcp"
 
     cat > "${SC_FILE}" <<EOF2
 [torrserver]
-title="TorrServer MatriX"
-desc="TorrServer MatriX"
+title="TorrServer DSM"
+desc="TorrServer DSM"
 port_forward="yes"
 dst.ports="${FIREWALL_PORTS}"
 EOF2

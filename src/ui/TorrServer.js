@@ -38,7 +38,7 @@ Ext.define("SYNO.SDS.TorrServer.MainWindow", {
             height: 760,
             minWidth: 800,
             minHeight: 550,
-            title: "TorrServer MatriX",
+            title: "TorrServer DSM",
             html: MY.Utils.getMainHtml()
         }, cfg));
 

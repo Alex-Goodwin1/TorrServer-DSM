@@ -4,7 +4,6 @@ set -e
 TORRSERVER_VERSION=$1
 ARCH=$2
 PKG_VERSION=$3
-DSM=$4
 
 download_torrserver() {
     local base_url="https://github.com/YouROK/TorrServer/releases/download/${TORRSERVER_VERSION}"
@@ -96,7 +95,7 @@ make_spk() {
     local spk_tmp_dir=$1
     local spk_dest_dir="./spk"
     local pkg_size=$(cat ${spk_tmp_dir}/extractsize_tmp)
-    local spk_filename="TorrServer-${DSM}-${TORRSERVER_VERSION}-${ARCH}.spk"
+    local spk_filename="TorrServer-DSM-${TORRSERVER_VERSION}-${ARCH}.spk"
 
     echo ">>> Making spk: ${spk_filename}"
 
@@ -128,7 +127,7 @@ make_pkg() {
 }
 
 main() {
-    echo ">>> Building package for DSM-${DSM} ${TORRSERVER_VERSION} ${ARCH}"
+    echo ">>> Building package for ${TORRSERVER_VERSION} ${ARCH}"
 
     download_ffprobe
     download_torrserver

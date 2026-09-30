@@ -1,68 +1,84 @@
-# TorrServer package for Synology NAS
+# TorrServer DSM
 
-Synology NAS package for DSM 7.3 and newer, based on TorrServer binaries:
+Synology DSM package for [TorrServer](https://github.com/YouROK/TorrServer).
 
-https://github.com/YouROK/TorrServer/releases
+TorrServer DSM provides a native DSM interface for managing TorrServer on Synology NAS.
 
-You can thank the TorrServer developer here:
+## Features
 
-https://github.com/YouROK/TorrServer#donate
+- DSM interface for package management
 
-# Supported Architecture
+### Settings
 
-* arm7 - armv7 alpine alpine4k armada370 armada375 armada38x armadaxp monaco
-* arm64 - aarch64 armv8 rtd1296 armada37xx rtd1619b
-* amd64 - apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000 x86_64
+- Port configuration
+- HTTP / HTTPS
+- Force HTTPS
+- HTTP authentication
+- TorrServer cache configuration
+- Logs and package status
+- Restart TorrServer from DSM
 
-DSM versions below 7.3 and the following architectures are not supported:
+## Requirements
 
-* 386 / evansport
-* ARMv5
+- Synology DSM 7.3 or newer
+- Supported architectures:
+  - `amd64`
+  - `arm64`
+  - `arm7`
 
-# Automatic update
+## Installation
 
-Add https://grigi.lt/ to your Synology NAS Package Center sources!
+Install the `.spk` package through:
 
-# Making packages from precompiled TorrServer binaries
+**Package Center → Manual Install**
 
-```bash
-git clone https://github.com/vladlenas/Synology-TorrServer.git
-cd Synology-TorrServer/
-```
+After installation, open **TorrServer DSM** from the DSM desktop.
 
-```bash
-make
-```
+## Building
 
-TorrServer version and package version can be changed in `Makefile`:
+Clone the repository:
 
-```make
-TORRSERVER_VERSION := MatriX.143
-PKG_VERSION := 1.2.143
-DSM := 7.3
-```
+    git clone https://github.com/vladlenas/TorrServer-DSM.git
+    cd TorrServer-DSM
 
-# Clear working directory
+Build the SPK packages:
 
-```bash
-make clean
-```
+    make
 
-# Log file
+The generated packages are placed in the `build` directory.
 
-```text
-/var/packages/TorrServer/var/TorrServer.log
-/var/log/packages/TorrServer.log
-```
+To clean the build directory:
 
-# Permission DSM 7.3 for write cache to hard drive
+    make clean
 
-* `Control Panel > Shared Folder > Select Shared Folder > Edit > Permissions > System internal user > TorrServer user > Read/Write`
+## TorrServer Version
 
-# Credits and References
+The TorrServer version used by the package is defined in `Makefile`:
 
-* YouROK: https://github.com/YouROK
-* TorrServer: https://github.com/YouROK/TorrServer
-* SynoCommunity: https://github.com/SynoCommunity/spksrc
-* Synology DSM Developer Guide: https://help.synology.com/developer-guide/
-* Architecture per Synology model: https://github.com/SynoCommunity/spksrc/wiki/Architecture-per-Synology-model
+    TORRSERVER_VERSION := MatriX.145
+
+The package version is also defined in `Makefile`:
+
+    PKG_VERSION := 1.2.145
+
+## Data and Logs
+
+TorrServer data is stored in:
+
+    /var/packages/TorrServer/var/
+
+The TorrServer log is:
+
+    /var/packages/TorrServer/var/TorrServer.log
+
+## Links
+
+- [TorrServer Project](https://github.com/YouROK/TorrServer)
+- [TorrServer DSM](https://github.com/vladlenas/TorrServer-DSM)
+- [Support TorrServer Project](https://github.com/YouROK/TorrServer#donate)
+
+## Credits
+
+TorrServer by [YouROK](https://github.com/YouROK/TorrServer).
+
+Synology SPK package maintained by [vladlenas](https://github.com/vladlenas).

@@ -2,9 +2,9 @@
     "TorrServer.js": {
         "SYNO.SDS.TorrServer.Application": {
             "type": "app",
-            "title": "TorrServer MatriX",
+            "title": "TorrServer DSM",
             "appWindow": "SYNO.SDS.TorrServer.MainWindow",
-            "desc": "TorrServer MatriX",
+            "desc": "TorrServer DSM",
             "icon": "images/torrserver-{0}.png",
             "allowMultiInstance": false,
             "allowStandalone": true,
@@ -19,7 +19,7 @@
 
         "SYNO.SDS.TorrServer.MainWindow": {
             "type": "lib",
-            "title": "TorrServer MatriX",
+            "title": "TorrServer DSM",
             "icon": "images/torrserver-{0}.png",
             "depend": [
                 "SYNO.SDS.TorrServer.Utils"

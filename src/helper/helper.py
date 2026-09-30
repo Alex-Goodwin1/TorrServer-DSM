@@ -1901,7 +1901,7 @@ def main_page(host):
 
 
 <div class="dashboard-card info-card">
-    <div class="info-maintainer-top">synology package maintained by vladlenas</div>
+    <div class="info-maintainer-top">Synology SPK package maintained by vladlenas</div>
 
     <div class="dashboard-card-title">
         <span class="metric-icon">i</span>
@@ -1910,16 +1910,14 @@ def main_page(host):
 
     <div class="info-layout">
         <div class="info-text">
-            <div class="info-title">TorrServer MatriX</div>
-            <div class="info-subtitle">Project, SPK package and support</div>
+            <div class="info-title">TorrServer DSM</div>
+            <div class="info-subtitle">TorrServer project, Synology SPK package and support</div>
         </div>
 
         <div class="info-links">
-            <a class="info-link" href="https://github.com/YouROK/TorrServer" target="_blank" rel="noopener noreferrer">Project ↗</a>
-            <a class="info-link" href="https://grigi.lt/" target="_blank" rel="noopener noreferrer">SPK Repository ↗</a>
-            <a class="info-link" href="https://github.com/vladlenas/Synology-TorrServer" target="_blank" rel="noopener noreferrer">SPK Project ↗</a>
-            <a class="info-link" href="https://github.com/vladlenas/Synology-TorrServer/issues" target="_blank" rel="noopener noreferrer">SPK Issues ↗</a>
-            <a class="info-link info-donate" href="https://github.com/YouROK/TorrServer#donate" target="_blank" rel="noopener noreferrer">♥ Donate ↗</a>
+            <a class="info-link" href="https://github.com/YouROK/TorrServer" target="_blank" rel="noopener noreferrer">TorrServer Project ↗</a>
+            <a class="info-link" href="https://github.com/vladlenas/TorrServer-DSM" target="_blank" rel="noopener noreferrer">SPK Project ↗</a>
+            <a class="info-link info-donate" href="https://github.com/YouROK/TorrServer#donate" target="_blank" rel="noopener noreferrer">♥ Support TorrServer project ↗</a>
         </div>
     </div>
 </div>

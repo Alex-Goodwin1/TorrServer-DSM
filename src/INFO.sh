@@ -36,7 +36,7 @@ esac
 cat <<EOF
 package="TorrServer"
 version="${PKG_VERSION}"
-displayname="TorrServer"
+displayname="TorrServer DSM"
 dsmappname="SYNO.SDS.TorrServer.Application"
 arch="${PLATFORMS}"
 os_min_ver="${OS_MIN_VER}"
