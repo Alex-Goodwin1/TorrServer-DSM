@@ -61,16 +61,6 @@ The package version is also defined in `Makefile`:
 
     PKG_VERSION := 1.2.145
 
-## Data and Logs
-
-TorrServer data is stored in:
-
-    /var/packages/TorrServer/var/
-
-The TorrServer log is:
-
-    /var/packages/TorrServer/var/TorrServer.log
-
 ## Links
 
 - [TorrServer Project](https://github.com/YouROK/TorrServer)
