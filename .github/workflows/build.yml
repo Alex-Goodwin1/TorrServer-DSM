@@ -13,26 +13,20 @@ jobs:
   check-version:
     name: Check package version
     runs-on: ubuntu-latest
-
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       version: ${{ steps.check.outputs.version }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
       - name: Check PKG_VERSION change
         id: check
         run: |
-          NEW_VERSION=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile \
-            | head -1 \
-            | sed 's/^PKG_VERSION[[:space:]]*:=//')
-
-          NEW_VERSION=$(echo "$NEW_VERSION" | xargs)
-
+          NEW_VERSION=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile | head -1 | sed 's/^PKG_VERSION[[:space:]]*:=//' | xargs)
           echo "Current version: $NEW_VERSION"
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -42,15 +36,8 @@ jobs:
             exit 0
           fi
 
-          OLD_VERSION=$(git show "${{ github.event.before }}:Makefile" 2>/dev/null \
-            | grep -E '^PKG_VERSION[[:space:]]*:=' \
-            | head -1 \
-            | sed 's/^PKG_VERSION[[:space:]]*:=//')
-
-          OLD_VERSION=$(echo "$OLD_VERSION" | xargs)
-
+          OLD_VERSION=$(git show "${{ github.event.before }}:Makefile" 2>/dev/null | grep -E '^PKG_VERSION[[:space:]]*:=' | head -1 | sed 's/^PKG_VERSION[[:space:]]*:=//' | xargs)
           echo "Previous version: $OLD_VERSION"
-          echo "Current version:  $NEW_VERSION"
 
           if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
             echo "Package version changed!"
@@ -68,15 +55,51 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Clone and patch original TorrServer
+        run: |
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          echo "Cloning original TorrServer version: $TS_VERSION"
+          git clone https://github.com/YouROK/TorrServer.git torrserver_src
+          cd torrserver_src
+          git checkout "$TS_VERSION"
+          
+          # Патчим referer.go: заменяем весь массив defaultBlockedReferers на пустой
+          sed -i '/var defaultBlockedReferers = \[\]string{/,/^}/c\var defaultBlockedReferers = []string{}' server/web/waf/referer.go
+          
+          echo "Проверка патча:"
+          grep -A 1 "var defaultBlockedReferers" server/web/waf/referer.go
+
+      - name: Build TorrServer binaries
+        run: |
+          mkdir -p dest_bin
+          cd torrserver_src/server
+          
+          LDFLAGS="-s -w -checklinkname=0"
+          BUILD_FLAGS="-ldflags='$LDFLAGS' -tags=nosqlite -trimpath"
+          
+          echo "Building linux/amd64..."
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-amd64 ./cmd
+          
+          echo "Building linux/arm64..."
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-arm64 ./cmd
+          
+          echo "Building linux/arm7..."
+          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-arm7 ./cmd
+          
+          echo "Built binaries:"
+          ls -lh ../../dest_bin/
+
+      - name: Install DSM build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            wget \
-            unzip \
-            xz-utils
+          sudo apt-get install -y wget unzip xz-utils
 
       - name: Build SPK packages
         run: |
@@ -84,11 +107,11 @@ jobs:
 
       - name: List build results
         run: |
-          echo "Built packages:"
+          echo "Built SPK packages:"
           find spk -maxdepth 1 -type f -name '*.spk' -print
 
       - name: Upload SPK packages as artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
           path: spk/*.spk
@@ -106,10 +129,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Download built SPK packages
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v4
         with:
           name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
           path: spk
@@ -125,26 +148,26 @@ jobs:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
           cat <<EOF > packages.json
-{
-  "packages": [
-    {
-      "package": "TorrServer",
-      "version": "${VERSION}",
-      "displayname": "TorrServer DSM",
-      "description": "TorrServer, torrent to http (Uncensored fork)",
-      "arch": "x86_64 aarch64 armv7",
-      "maintainer": "vladlenas-fork",
-      "distributor": "vladlenas-fork",
-      "distributor_url": "https://github.com/${{ github.repository }}",
-      "category": "download",
-      "beta": false,
-      "startable": true,
-      "installable": true,
-      "uninstallable": true
-    }
-  ]
-}
-EOF
+          {
+            "packages": [
+              {
+                "package": "TorrServer",
+                "version": "${VERSION}",
+                "displayname": "TorrServer DSM",
+                "description": "TorrServer, torrent to http (Uncensored build from original source)",
+                "arch": "x86_64 aarch64 armv7",
+                "maintainer": "vladlenas-fork",
+                "distributor": "vladlenas-fork",
+                "distributor_url": "https://github.com/${{ github.repository }}",
+                "category": "download",
+                "beta": false,
+                "startable": true,
+                "installable": true,
+                "uninstallable": true
+              }
+            ]
+          }
+          EOF
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -159,5 +182,5 @@ EOF
         run: |
           gh release create "v${VERSION}" \
             spk/*.spk \
-            --title "TorrServer DSM v${VERSION}" \
+            --title "TorrServer DSM v${VERSION} (Uncensored)" \
             --generate-notes
