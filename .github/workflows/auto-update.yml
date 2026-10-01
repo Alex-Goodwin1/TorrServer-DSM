@@ -1,4 +1,4 @@
-name: Auto-update from bylampa/Matrix
+name: Auto-update from YouROK/TorrServer
 
 on:
   schedule:
@@ -18,11 +18,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Get latest release from bylampa/Matrix
+      - name: Get latest release from YouROK/TorrServer
         id: get_release
         run: |
           RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/bylampa/Matrix/releases/latest")
+            "https://api.github.com/repos/YouROK/TorrServer/releases/latest")
           
           LATEST_TAG=$(echo "$RESPONSE" | jq -r '.tag_name')
           
