@@ -38,6 +38,7 @@
   "SSL Certificate": "SSL-сертификат",
   "Certificate source": "Источник сертификата",
   "TorrServer self-signed": "Самоподписанный TorrServer",
+  "Invalid DSM certificate selection": "Недопустимый выбор сертификата DSM",
   "DSM certificate": "Сертификат DSM",
   "Manual paths": "Пути вручную",
   "SSL Certificate path": "Путь к SSL-сертификату",

@@ -38,6 +38,7 @@
   "SSL Certificate": "SSL sertifikatas",
   "Certificate source": "Sertifikato šaltinis",
   "TorrServer self-signed": "TorrServer savarankiškai pasirašytas",
+  "Invalid DSM certificate selection": "Neteisingai pasirinktas DSM sertifikatas",
   "DSM certificate": "DSM sertifikatas",
   "Manual paths": "Keliai rankiniu būdu",
   "SSL Certificate path": "SSL sertifikato kelias",

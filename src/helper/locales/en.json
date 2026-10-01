@@ -38,6 +38,7 @@
   "SSL Certificate": "SSL Certificate",
   "Certificate source": "Certificate source",
   "TorrServer self-signed": "TorrServer self-signed",
+  "Invalid DSM certificate selection": "Invalid DSM certificate selection",
   "DSM certificate": "DSM certificate",
   "Manual paths": "Manual paths",
   "SSL Certificate path": "SSL Certificate path",

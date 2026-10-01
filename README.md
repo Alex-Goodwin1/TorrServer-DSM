@@ -48,11 +48,11 @@ To clean the build directory:
 
 The TorrServer version used by the package is defined in `Makefile`:
 
-    TORRSERVER_VERSION := MatriX.145
+    TORRSERVER_VERSION := MatriX.145.1
 
 The package version is also defined in `Makefile`:
 
-    PKG_VERSION := 1.2.145
+    PKG_VERSION := 1.4.145.1
 
 ## Links
 

@@ -53,12 +53,13 @@ CERTIFICATE_HELPER = "/var/packages/TorrServer/scripts/certificate-helper"
 
 LOCALE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locales")
 LANGUAGE_FILE = os.path.join(PACKAGE_VAR, "helper.language")
-SUPPORTED_LANGUAGES = ("en", "ru", "lt", "pl")
+SUPPORTED_LANGUAGES = ("en", "ru", "lt", "pl", "uk")
 LANGUAGE_NAMES = {
     "en": "English",
     "ru": "Русский",
     "lt": "Lietuvių",
     "pl": "Polski",
+    "uk": "Українська",
 }
 
 

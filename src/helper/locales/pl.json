@@ -38,6 +38,7 @@
   "SSL Certificate": "Certyfikat SSL",
   "Certificate source": "Źródło certyfikatu",
   "TorrServer self-signed": "Certyfikat własny TorrServer",
+  "Invalid DSM certificate selection": "Nieprawidłowy wybór certyfikatu DSM",
   "DSM certificate": "Certyfikat DSM",
   "Manual paths": "Ścieżki ręczne",
   "SSL Certificate path": "Ścieżka certyfikatu SSL",

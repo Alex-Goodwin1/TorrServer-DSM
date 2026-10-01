@@ -94,6 +94,21 @@ EOF2
 
 update_firewall_port
 
+# Ensure TorrServer can execute the two package helpers as root.
+# This is also done at startup so an upgrade cannot leave the package
+# without its sudoers entry.
+ensure_privileged_helpers ()
+{
+    /bin/mkdir -p /etc/sudoers.d
+
+    /bin/sh -c \
+        "printf '%s\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}' > '${SUDOERS_FILE}'"
+
+    /bin/chmod 0440 "${SUDOERS_FILE}"
+}
+
+ensure_privileged_helpers
+
 # Synchronize the selected TLS certificate/key before TorrServer starts.
 if [ -x "${CERTIFICATE_HELPER}" ]; then
     /bin/sudo -n "${CERTIFICATE_HELPER}" sync
