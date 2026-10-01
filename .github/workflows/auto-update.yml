@@ -1,0 +1,90 @@
+name: Auto-update from bylampa/Matrix
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get latest release from bylampa/Matrix
+        id: get_release
+        run: |
+          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/bylampa/Matrix/releases/latest")
+          
+          LATEST_TAG=$(echo "$RESPONSE" | jq -r '.tag_name')
+          
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "Failed to fetch latest release tag"
+            exit 1
+          fi
+          
+          echo "Latest release tag: $LATEST_TAG"
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Get current version from Makefile
+        id: get_current
+        run: |
+          CURRENT_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//')
+          CURRENT_VERSION=$(echo "$CURRENT_VERSION" | xargs)
+          
+          echo "Current version in Makefile: $CURRENT_VERSION"
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Compare versions
+        id: compare
+        run: |
+          LATEST="${{ steps.get_release.outputs.tag }}"
+          CURRENT="${{ steps.get_current.outputs.current }}"
+          
+          echo "Comparing: $CURRENT vs $LATEST"
+          
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "New version detected!"
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Already up to date"
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Makefile
+        if: steps.compare.outputs.update_needed == 'true'
+        run: |
+          LATEST="${{ steps.get_release.outputs.tag }}"
+          
+          sed -i "s/^TORRSERVER_VERSION[[:space:]]*:=.*/TORRSERVER_VERSION := $LATEST/" Makefile
+          
+          BASE_VERSION=$(echo "$LATEST" | sed 's/MatriX\.//')
+          NEW_PKG_VERSION="1.4.${BASE_VERSION}.UN"
+          sed -i "s/^PKG_VERSION[[:space:]]*:=.*/PKG_VERSION := $NEW_PKG_VERSION/" Makefile
+          
+          echo "Updated Makefile:"
+          echo "  TORRSERVER_VERSION := $LATEST"
+          echo "  PKG_VERSION := $NEW_PKG_VERSION"
+
+      - name: Commit and push changes
+        if: steps.compare.outputs.update_needed == 'true'
+        run: |
+          LATEST="${{ steps.get_release.outputs.tag }}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add Makefile
+          git commit -m "Auto-update to $LATEST [skip ci]" || exit 0
+          git push
+          
+          echo "Changes committed and pushed"
+          echo "Build workflow will be triggered automatically"
