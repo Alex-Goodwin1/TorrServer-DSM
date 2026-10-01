@@ -7,8 +7,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    name: Check package version
+    runs-on: ubuntu-latest
+
+    outputs:
+      version_changed: ${{ steps.check.outputs.version_changed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Check PKG_VERSION change
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual workflow run"
+            echo "version_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          OLD_VERSION=$(git show "${{ github.event.before }}:Makefile" 2>/dev/null \
+            | grep -E '^PKG_VERSION[[:space:]]*:=' \
+            | head -1 \
+            | sed 's/^PKG_VERSION[[:space:]]*:=//')
+
+          NEW_VERSION=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile \
+            | head -1 \
+            | sed 's/^PKG_VERSION[[:space:]]*:=//')
+
+          OLD_VERSION=$(echo "$OLD_VERSION" | xargs)
+          NEW_VERSION=$(echo "$NEW_VERSION" | xargs)
+
+          echo "Old version: $OLD_VERSION"
+          echo "New version: $NEW_VERSION"
+
+          if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+            echo "Package version changed!"
+            echo "version_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Package version did not change."
+            echo "version_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build SPK packages
+    needs: check-version
+    if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
 
     steps:
