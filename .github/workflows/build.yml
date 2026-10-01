@@ -1,4 +1,4 @@
-name: Build TorrServer DSM
+name: Build TorrServer DSM & Android
 
 on:
   push:
@@ -48,7 +48,7 @@ jobs:
           fi
 
   build:
-    name: Build SPK packages
+    name: Build SPK and Android APK
     needs: check-version
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
@@ -61,44 +61,52 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache: false # Отключаем кэш, так как go.mod находится в подпапке, чтобы избежать предупреждений
+          cache: false
+
+      - name: Setup Java for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Clone and patch original TorrServer
         run: |
           TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
-          echo "Cloning original TorrServer version: $TS_VERSION"
           git clone https://github.com/YouROK/TorrServer.git torrserver_src
           cd torrserver_src
           git checkout "$TS_VERSION"
           
-          # Патчим referer.go: заменяем весь массив defaultBlockedReferers на пустой
           sed -i '/var defaultBlockedReferers = \[\]string{/,/^}/c\var defaultBlockedReferers = []string{}' server/web/waf/referer.go
           
-          echo "Проверка патча:"
-          grep -A 1 "var defaultBlockedReferers" server/web/waf/referer.go
+          REPO_URL="${{ github.repository }}"
+          find app -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i "s|YouROK/TorrServer|$REPO_URL|g" {} +
 
       - name: Build TorrServer binaries
         run: |
-          # Создаем папку dest_bin в корне репозитория и сохраняем абсолютный путь
           mkdir -p dest_bin
           DEST_DIR=$(pwd)/dest_bin
           
           cd torrserver_src/server
-          
           LDFLAGS="-s -w -checklinkname=0"
           BUILD_FLAGS="-ldflags='$LDFLAGS' -tags=nosqlite -trimpath"
           
-          echo "Building linux/amd64..."
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-amd64" ./cmd
-          
-          echo "Building linux/arm64..."
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-arm64" ./cmd
-          
-          echo "Building linux/arm7..."
           GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-arm7" ./cmd
           
-          echo "Built binaries:"
           ls -lh "$DEST_DIR"
+
+      - name: Build Android APK
+        run: |
+          cd torrserver_src
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          
+          mkdir -p ../android_out
+          cp app/build/outputs/apk/release/app-release-unsigned.apk ../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk 2>/dev/null || \
+          cp app/build/outputs/apk/release/*.apk ../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk 2>/dev/null || true
+          
+          ls -lh ../android_out/
 
       - name: Install DSM build dependencies
         run: |
@@ -113,12 +121,16 @@ jobs:
         run: |
           echo "Built SPK packages:"
           find spk -maxdepth 1 -type f -name '*.spk' -print
+          echo "Built Android APK:"
+          ls -lh android_out/ || true
 
-      - name: Upload SPK packages as artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
-          path: spk/*.spk
+          name: TorrServer-Build-${{ needs.check-version.outputs.version }}
+          path: |
+            spk/*.spk
+            android_out/*.apk
           if-no-files-found: error
 
   release:
@@ -135,17 +147,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download built SPK packages
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
-          path: spk
+          name: TorrServer-Build-${{ needs.check-version.outputs.version }}
+          path: artifacts
 
       - name: Show release files
         run: |
           echo "Release version: ${{ needs.check-version.outputs.version }}"
           echo "Files:"
-          ls -lh spk/*.spk
+          ls -lh artifacts/
 
       - name: Update packages.json
         env:
@@ -158,8 +170,8 @@ jobs:
                 "package": "TorrServer",
                 "version": "${VERSION}",
                 "displayname": "TorrServer DSM",
-                "description": "TorrServer, torrent to http (Uncensored build from original source)",
-                "arch": "x86_64 aarch64 armv7",
+                "description": "TorrServer DSM + Android Client (Uncensored build)",
+                "arch": "x86_64 aarch64 armv7 android",
                 "maintainer": "vladlenas-fork",
                 "distributor": "vladlenas-fork",
                 "distributor_url": "https://github.com/${{ github.repository }}",
@@ -185,6 +197,7 @@ jobs:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
           gh release create "v${VERSION}" \
-            spk/*.spk \
-            --title "TorrServer DSM v${VERSION} (Uncensored)" \
+            artifacts/spk/*.spk \
+            artifacts/android_out/*.apk \
+            --title "TorrServer DSM & Android v${VERSION} (Uncensored)" \
             --generate-notes
