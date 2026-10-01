@@ -1,6 +1,6 @@
 # TorrServer DSM
 
-Synology DSM package for [TorrServer](https://github.com/YouROK/TorrServer).
+Synology DSM package for TorrServer.
 
 TorrServer DSM provides a native DSM interface for managing TorrServer on Synology NAS.
 
@@ -27,23 +27,6 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
   - `arm64`
   - `arm7`
 
-## Building
-
-Clone the repository:
-
-    git clone https://github.com/vladlenas/TorrServer-DSM.git
-    cd TorrServer-DSM
-
-Build the SPK packages:
-
-    make
-
-The generated packages are placed in the `build` directory.
-
-To clean the build directory:
-
-    make clean
-
 ## TorrServer Version
 
 The TorrServer version used by the package is defined in `Makefile`:
@@ -53,12 +36,6 @@ The TorrServer version used by the package is defined in `Makefile`:
 The package version is also defined in `Makefile`:
 
     PKG_VERSION := 1.4.145.1
-
-## Links
-
-- [TorrServer Project](https://github.com/YouROK/TorrServer)
-- [TorrServer DSM](https://github.com/vladlenas/TorrServer-DSM)
-- [Support TorrServer Project](https://github.com/YouROK/TorrServer#donate)
 
 ## Credits
 
