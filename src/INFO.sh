@@ -8,8 +8,7 @@ PKG_SIZE="${3:?Package size is required}"
 
 TIMESTAMP="$(date -u +%Y%m%d-%H:%M:%S)"
 
-# TorrServer requires DSM 7.3 or newer.
-OS_MIN_VER="7.3-81180"
+OS_MIN_VER="7.0-41890"
 
 case "${ARCH}" in
 
@@ -44,7 +43,7 @@ dsmuidir="ui"
 instuninst_restart_services="nginx.service"
 startable="yes"
 maintainer="TorrServer"
-maintainer_url="https://github.com/YouROK/TorrServer"
+maintainer_url="https://github.com/bylampa/Matrix"
 distributor="vladlenas"
 distributor_url="https://github.com/vladlenas/TorrServer-DSM"
 description="TorrServer, torrent to http."
