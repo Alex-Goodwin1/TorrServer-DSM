@@ -9,12 +9,8 @@
       "maintainer": "Alex-Goodwin1",
       "distributor": "Alex-Goodwin1",
       "distributor_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM",
-      "support_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM/issues",
-      "thumbnail": "https://raw.githubusercontent.com/Alex-Goodwin1/TorrServer-DSM/main/src/PACKAGE_ICON_256.PNG",
       "category": "download",
       "beta": false,
-      "deps": [],
-      "conflictpkgs": [],
       "startable": true,
       "installable": true,
       "uninstallable": true
