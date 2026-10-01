@@ -67,7 +67,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Clone and patch original TorrServer
         run: |
@@ -186,9 +186,9 @@ jobs:
                 "version": "${VERSION}",
                 "displayname": "TorrServer DSM",
                 "description": "TorrServer DSM + Android Client (Uncensored build)",
-                "arch": "x86_64 aarch64 armv7 android",
-                "maintainer": "vladlenas-fork",
-                "distributor": "vladlenas-fork",
+                "arch": "x86_64 aarch64 armv7",
+                "maintainer": "Alex-Goodwin1",
+                "distributor": "Alex-Goodwin1",
                 "distributor_url": "https://github.com/${{ github.repository }}",
                 "category": "download",
                 "beta": false,
