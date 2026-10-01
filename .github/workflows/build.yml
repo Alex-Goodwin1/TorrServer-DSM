@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check-version:
     name: Check package version
@@ -13,6 +16,7 @@ jobs:
 
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
+      version: ${{ steps.check.outputs.version }}
 
     steps:
       - name: Checkout
@@ -23,6 +27,15 @@ jobs:
       - name: Check PKG_VERSION change
         id: check
         run: |
+          NEW_VERSION=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile \
+            | head -1 \
+            | sed 's/^PKG_VERSION[[:space:]]*:=//')
+
+          NEW_VERSION=$(echo "$NEW_VERSION" | xargs)
+
+          echo "Current version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Manual workflow run"
             echo "version_changed=true" >> "$GITHUB_OUTPUT"
@@ -34,15 +47,10 @@ jobs:
             | head -1 \
             | sed 's/^PKG_VERSION[[:space:]]*:=//')
 
-          NEW_VERSION=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile \
-            | head -1 \
-            | sed 's/^PKG_VERSION[[:space:]]*:=//')
-
           OLD_VERSION=$(echo "$OLD_VERSION" | xargs)
-          NEW_VERSION=$(echo "$NEW_VERSION" | xargs)
 
-          echo "Old version: $OLD_VERSION"
-          echo "New version: $NEW_VERSION"
+          echo "Previous version: $OLD_VERSION"
+          echo "Current version:  $NEW_VERSION"
 
           if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
             echo "Package version changed!"
@@ -79,9 +87,45 @@ jobs:
           echo "Built packages:"
           find spk -maxdepth 1 -type f -name '*.spk' -print
 
-      - name: Upload SPK packages
+      - name: Upload SPK packages as artifact
         uses: actions/upload-artifact@v5
         with:
-          name: TorrServer-DSM-${{ github.sha }}
+          name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
           path: spk/*.spk
           if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs:
+      - check-version
+      - build
+    if: |
+      github.event_name == 'push' &&
+      needs.check-version.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download built SPK packages
+        uses: actions/download-artifact@v5
+        with:
+          name: TorrServer-DSM-${{ needs.check-version.outputs.version }}
+          path: spk
+
+      - name: Show release files
+        run: |
+          echo "Release version: ${{ needs.check-version.outputs.version }}"
+          echo "Files:"
+          ls -lh spk/*.spk
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            spk/*.spk \
+            --title "TorrServer DSM v${VERSION}" \
+            --generate-notes
