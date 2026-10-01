@@ -27,8 +27,9 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
   - `arm64`
   - `arm7`
 
+
 ## Credits
 
-TorrServer by [YouROK](https://github.com/YouROK/TorrServer).
-
-Synology SPK package maintained by [vladlenas](https://github.com/vladlenas).
+- Core TorrServer by [YouROK](https://github.com/YouROK/TorrServer)
+- Original Synology SPK packaging by [vladlenas](https://github.com/vladlenas/TorrServer-DSM)
+- Uncensored build, Android client patching and auto-update automation by [Alex-Goodwin1](https://github.com/Alex-Goodwin1/TorrServer-DSM)
