@@ -1,0 +1,23 @@
+{
+  "packages": [
+    {
+      "package": "TorrServer",
+      "version": "1.4.145.UN.70",
+      "displayname": "TorrServer DSM",
+      "description": "TorrServer, torrent to http (Uncensored fork)",
+      "arch": "x86_64 aarch64 armv7",
+      "maintainer": "YourName",
+      "distributor": "YourName",
+      "distributor_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM",
+      "support_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM/issues",
+      "thumbnail": "https://raw.githubusercontent.com/Alex-Goodwin1/TorrServer-DSM/main/src/PACKAGE_ICON_256.PNG",
+      "category": "download",
+      "beta": false,
+      "deps": [],
+      "conflictpkgs": [],
+      "startable": true,
+      "installable": true,
+      "uninstallable": true
+    }
+  ]
+}
