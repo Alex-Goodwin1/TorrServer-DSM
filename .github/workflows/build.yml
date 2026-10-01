@@ -1,4 +1,4 @@
-name: Build TorrServer DSM & Android
+name: Build TorrServer DSM & Android Client
 
 on:
   push:
@@ -78,8 +78,7 @@ jobs:
           
           sed -i '/var defaultBlockedReferers = \[\]string{/,/^}/c\var defaultBlockedReferers = []string{}' server/web/waf/referer.go
           
-          REPO_URL="${{ github.repository }}"
-          find app -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i "s|YouROK/TorrServer|$REPO_URL|g" {} +
+          grep -A 1 "var defaultBlockedReferers" server/web/waf/referer.go
 
       - name: Build TorrServer binaries
         run: |
@@ -96,9 +95,20 @@ jobs:
           
           ls -lh "$DEST_DIR"
 
+      - name: Clone and patch TorrServe Android client
+        run: |
+          git clone https://github.com/YouROK/TorrServe.git torrserv_android
+          cd torrserv_android
+          
+          REPO_URL="${{ github.repository }}"
+          
+          find app/src -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i "s|YouROK/TorrServer|$REPO_URL|g" {} +
+          
+          echo "Patched Android client to use: $REPO_URL"
+
       - name: Build Android APK
         run: |
-          cd torrserver_src
+          cd torrserv_android
           chmod +x gradlew
           ./gradlew assembleRelease
           
