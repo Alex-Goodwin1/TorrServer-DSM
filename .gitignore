@@ -1,3 +1,6 @@
 spk/
 dest_bin/
 build/
+android_out/
+torrserver_src/
+torrserv_android/
