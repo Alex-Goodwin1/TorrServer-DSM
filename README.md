@@ -21,7 +21,7 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 
 ## Requirements
 
-- Synology DSM 7.3 or newer
+- Synology DSM 7.0 or newer
 - Supported architectures:
   - `amd64`
   - `arm64`
