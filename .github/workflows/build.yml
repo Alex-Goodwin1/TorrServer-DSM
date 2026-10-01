@@ -61,6 +61,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: false # Отключаем кэш, так как go.mod находится в подпапке, чтобы избежать предупреждений
 
       - name: Clone and patch original TorrServer
         run: |
@@ -78,23 +79,26 @@ jobs:
 
       - name: Build TorrServer binaries
         run: |
+          # Создаем папку dest_bin в корне репозитория и сохраняем абсолютный путь
           mkdir -p dest_bin
+          DEST_DIR=$(pwd)/dest_bin
+          
           cd torrserver_src/server
           
           LDFLAGS="-s -w -checklinkname=0"
           BUILD_FLAGS="-ldflags='$LDFLAGS' -tags=nosqlite -trimpath"
           
           echo "Building linux/amd64..."
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-amd64 ./cmd
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-amd64" ./cmd
           
           echo "Building linux/arm64..."
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-arm64 ./cmd
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-arm64" ./cmd
           
           echo "Building linux/arm7..."
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build $BUILD_FLAGS -o ../../dest_bin/TorrServer-linux-arm7 ./cmd
+          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build $BUILD_FLAGS -o "$DEST_DIR/TorrServer-linux-arm7" ./cmd
           
           echo "Built binaries:"
-          ls -lh ../../dest_bin/
+          ls -lh "$DEST_DIR"
 
       - name: Install DSM build dependencies
         run: |
