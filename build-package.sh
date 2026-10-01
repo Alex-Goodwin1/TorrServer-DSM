@@ -6,7 +6,7 @@ ARCH=$2
 PKG_VERSION=$3
 
 download_torrserver() {
-    local base_url="https://github.com/YouROK/TorrServer/releases/download/${TORRSERVER_VERSION}"
+    local base_url="https://github.com/bylampa/Matrix/releases/download/${TORRSERVER_VERSION}"
     local bin_name="TorrServer-linux-${ARCH}"
     local src_bin="${base_url}/${bin_name}"
     local dest_bin="dest_bin"
