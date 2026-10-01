@@ -120,6 +120,38 @@ jobs:
           echo "Files:"
           ls -lh spk/*.spk
 
+      - name: Update packages.json
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          cat <<EOF > packages.json
+{
+  "packages": [
+    {
+      "package": "TorrServer",
+      "version": "${VERSION}",
+      "displayname": "TorrServer DSM",
+      "description": "TorrServer, torrent to http (Uncensored fork)",
+      "arch": "x86_64 aarch64 armv7",
+      "maintainer": "vladlenas-fork",
+      "distributor": "vladlenas-fork",
+      "distributor_url": "https://github.com/${{ github.repository }}",
+      "category": "download",
+      "beta": false,
+      "startable": true,
+      "installable": true,
+      "uninstallable": true
+    }
+  ]
+}
+EOF
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages.json
+          git commit -m "Update packages.json to ${VERSION} [skip ci]" || echo "No changes to commit"
+          git push
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
