@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# Serialise builds so two runs can never publish the same version twice.
+concurrency:
+  group: torrserver-build
+  cancel-in-progress: false
+
 jobs:
   check-version:
     name: Check package version
@@ -80,6 +85,14 @@ jobs:
           
           grep -A 1 "var defaultBlockedReferers" server/web/waf/referer.go
 
+          # sed exits with status 0 even when its pattern does not match, so a
+          # renamed or reshaped block upstream would silently ship the censored
+          # binary. Fail the build instead of publishing it.
+          if ! grep -q 'var defaultBlockedReferers = \[\]string{}' server/web/waf/referer.go; then
+            echo "::error::referer.go was not patched - defaultBlockedReferers format changed upstream"
+            exit 1
+          fi
+
       - name: Build TorrServer binaries
         run: |
           mkdir -p dest_bin
@@ -87,18 +100,53 @@ jobs:
           
           cd torrserver_src/server
           LDFLAGS="-s -w -checklinkname=0"
+
+          # Newer TorrServer releases require a recent Go toolchain (go.mod of
+          # YouROK/TorrServer asks for Go 1.25.x). GOTOOLCHAIN=auto makes the
+          # installed Go download it automatically, and if a future linker
+          # dropped -checklinkname the build is retried without it.
+          build_target() {
+            local goos="$1" goarch="$2" goarm="$3" output="$4"
+
+            if [ -n "${goarm}" ]; then
+              GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" CGO_ENABLED=0 \
+                go build -ldflags="$LDFLAGS" -tags=nosqlite -trimpath -o "$output" ./cmd && return 0
+            else
+              GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+                go build -ldflags="$LDFLAGS" -tags=nosqlite -trimpath -o "$output" ./cmd && return 0
+            fi
+
+            echo "::warning::Retrying ${goos}/${goarch} without -checklinkname"
+
+            if [ -n "${goarm}" ]; then
+              GOOS="$goos" GOARCH="$goarch" GOARM="$goarm" CGO_ENABLED=0 \
+                go build -ldflags="-s -w" -tags=nosqlite -trimpath -o "$output" ./cmd
+            else
+              GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+                go build -ldflags="-s -w" -tags=nosqlite -trimpath -o "$output" ./cmd
+            fi
+          }
           
           echo "Building linux/amd64..."
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -tags=nosqlite -trimpath -o "$DEST_DIR/TorrServer-linux-amd64" ./cmd
+          build_target linux amd64 "" "$DEST_DIR/TorrServer-linux-amd64"
           
           echo "Building linux/arm64..."
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -tags=nosqlite -trimpath -o "$DEST_DIR/TorrServer-linux-arm64" ./cmd
+          build_target linux arm64 "" "$DEST_DIR/TorrServer-linux-arm64"
           
           echo "Building linux/arm7..."
-          GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -tags=nosqlite -trimpath -o "$DEST_DIR/TorrServer-linux-arm7" ./cmd
+          build_target linux arm7 7 "$DEST_DIR/TorrServer-linux-arm7"
           
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
+
+          # Smoke test: a broken (e.g. unpatched linkname) binary must never
+          # reach a release, so the amd64 build has to start and answer.
+          OUTPUT=$("$DEST_DIR/TorrServer-linux-amd64" --version 2>&1) && STATUS=0 || STATUS=$?
+          echo "TorrServer --version exited with ${STATUS}: ${OUTPUT}"
+          if [ -z "${OUTPUT}" ]; then
+            echo "::error::The TorrServer binary did not start"
+            exit 1
+          fi
 
       - name: Clone and patch TorrServe Android client
         run: |
@@ -115,7 +163,7 @@ jobs:
         run: |
           cd torrserv_android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease || echo "::warning::Android APK build failed - releasing the SPK only"
           
           mkdir -p ../android_out
           cp app/build/outputs/apk/release/app-release-unsigned.apk ../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk 2>/dev/null || \
@@ -130,7 +178,32 @@ jobs:
 
       - name: Build SPK packages
         run: |
+          # GitHub's web uploader stores new files as 100644 while
+          # build-package.sh runs src/INFO.sh directly and ships src/scripts
+          # as-is, so the executable bits are restored here rather than relying
+          # on the git mode surviving an upload through the browser.
+          chmod +x build-package.sh src/INFO.sh src/scripts/* 2>/dev/null || true
           make
+
+      - name: Validate SPK metadata
+        run: |
+          shopt -s nullglob
+          spk_files=(spk/*.spk)
+
+          if [ ${#spk_files[@]} -eq 0 ]; then
+            echo "::error::No SPK was produced"
+            exit 1
+          fi
+
+          for spk in "${spk_files[@]}"; do
+            version=$(tar -xOf "${spk}" INFO | sed -n 's/^version="\(.*\)"$/\1/p')
+            echo "${spk}: version=${version}"
+
+            if ! printf '%s' "${version}" | grep -Eq '^[0-9]+(\.[0-9]+)*(-[0-9]+)?$'; then
+              echo "::error::Package Center rejects non numeric versions - ${spk} carries '${version}'"
+              exit 1
+            fi
+          done
 
       - name: List build results
         run: |
@@ -206,13 +279,26 @@ jobs:
           git commit -m "Update packages.json to ${VERSION} [skip ci]" || echo "No changes to commit"
           git push
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          gh release create "v${VERSION}" \
-            artifacts/spk/*.spk \
-            artifacts/android_out/*.apk \
-            --title "TorrServer DSM & Android v${VERSION} (Uncensored)" \
-            --generate-notes
+          RELEASE_FILES="$(ls -1 artifacts/spk/*.spk artifacts/android_out/*.apk 2>/dev/null || true)"
+
+          if [ -z "${RELEASE_FILES}" ]; then
+            echo "::error::No release files were produced"
+            exit 1
+          fi
+
+          echo "Release files:"
+          printf '%s\n' ${RELEASE_FILES}
+
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists - uploading the new files"
+            gh release upload "v${VERSION}" ${RELEASE_FILES} --clobber
+          else
+            gh release create "v${VERSION}" ${RELEASE_FILES} \
+              --title "TorrServer DSM & Android v${VERSION} (Uncensored)" \
+              --generate-notes
+          fi

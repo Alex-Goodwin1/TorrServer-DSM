@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     
     steps:
       - name: Checkout repository
@@ -66,8 +67,14 @@ jobs:
           
           sed -i "s/^TORRSERVER_VERSION[[:space:]]*:=.*/TORRSERVER_VERSION := $LATEST/" Makefile
           
+          # TS tag -> numeric base for the SPK version (MatriX.145.1 -> 145.1)
           BASE_VERSION=$(echo "$LATEST" | sed 's/MatriX\.//')
-          NEW_PKG_VERSION="1.4.${BASE_VERSION}.UN"
+
+          # Synology only accepts "major.minor.build-revision" with digits, so
+          # keep the old revision and bump it for every generated build.
+          CURRENT_REV=$(grep -E '^PKG_VERSION[[:space:]]*:=' Makefile | head -1 | sed 's/.*-//' | xargs)
+          if ! [[ "$CURRENT_REV" =~ ^[0-9]+$ ]]; then CURRENT_REV=0; fi
+          NEW_PKG_VERSION="2.${BASE_VERSION}-$((CURRENT_REV + 1))"
           sed -i "s/^PKG_VERSION[[:space:]]*:=.*/PKG_VERSION := $NEW_PKG_VERSION/" Makefile
           
           echo "Updated Makefile:"
@@ -76,6 +83,10 @@ jobs:
 
       - name: Commit and push changes
         if: steps.compare.outputs.update_needed == 'true'
+        env:
+          # gh requires the token in the environment; without GH_TOKEN the
+          # `gh workflow run` below fails and the build would never start.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LATEST="${{ steps.get_release.outputs.tag }}"
           
@@ -85,6 +96,10 @@ jobs:
           git add Makefile
           git commit -m "Auto-update to $LATEST [skip ci]" || exit 0
           git push
+
+          # A push made with the default GITHUB_TOKEN never triggers other
+          # workflows, so the build has to be started explicitly.
+          gh workflow run build.yml --ref main
           
           echo "Changes committed and pushed"
-          echo "Build workflow will be triggered automatically"
+          echo "Build workflow dispatched"

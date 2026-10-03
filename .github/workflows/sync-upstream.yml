@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
@@ -28,38 +29,78 @@ jobs:
           git remote add upstream https://github.com/vladlenas/TorrServer-DSM.git || true
           git fetch upstream
 
-      - name: Update non-conflicting files from upstream
+      - name: Sync upstream files, bump revision and trigger the build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FILES_TO_UPDATE=(
-            "src/helper/helper.py"
-            "src/helper/locales/en.json"
-            "src/helper/locales/lt.json"
-            "src/helper/locales/pl.json"
-            "src/helper/locales/ru.json"
-            "src/helper/locales/uk.json"
-            "src/scripts/certificate-helper"
-            "src/scripts/functions"
-            "src/scripts/installer"
+          set -euo pipefail
+
+          # Files owned by this fork. Overwriting them from upstream would
+          # revert the numeric SPK version scheme, the DSM 7.0+ compatibility
+          # layer and this CI, so they are always kept as they are.
+          FORK_OWNED=(
+            ".github"
+            ".gitignore"
+            "LICENSE"
+            "Makefile"
+            "README.md"
+            "packages.json"
+            "src/INFO.sh"
             "src/scripts/restart-package"
             "src/scripts/service-setup"
-            "src/ui"
-            "src/nginx"
-            "src/conf"
-            "src/WIZARD_UIFILES"
-            "src/PACKAGE_ICON.PNG"
-            "src/PACKAGE_ICON_256.PNG"
-            "src/systemd"
           )
-          
-          for file in "${FILES_TO_UPDATE[@]}"; do
-            if git ls-tree -r upstream/main --name-only | grep -q "^$file"; then
-              git checkout upstream/main -- "$file" || true
-            fi
-          done
-          
-          git add -A
-          git diff --staged --quiet || git commit -m "Sync helper scripts and UI from upstream"
 
-      - name: Push changes
-        run: |
-          git push origin main || echo "No changes to push"
+          is_fork_owned() {
+            local path="$1" owned
+            for owned in "${FORK_OWNED[@]}"; do
+              if [ "${path}" = "${owned}" ] || [[ "${path}" == "${owned}/"* ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          while IFS= read -r path; do
+            [ -n "${path}" ] || continue
+            if is_fork_owned "${path}"; then
+              echo "keep fork version: ${path}"
+              continue
+            fi
+            git checkout upstream/main -- "${path}"
+          done < <(git ls-tree -r upstream/main --name-only)
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Upstream did not change any packaged file - nothing to do."
+            exit 0
+          fi
+
+          # Upstream package content changed, so bump the package revision to
+          # make Package Center offer the freshly built SPK as an update.
+          TS_VERSION=$(sed -n 's/^TORRSERVER_VERSION[[:space:]]*:=[[:space:]]*//p' Makefile | head -1 | xargs)
+          BASE_VERSION=$(printf '%s' "${TS_VERSION}" | sed 's/MatriX\.//')
+
+          if [[ ! "${BASE_VERSION}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "::warning::Cannot derive a numeric version from '${TS_VERSION}', using 0.1"
+            BASE_VERSION="0.1"
+          fi
+
+          CURRENT_REV=$(sed -n 's/^PKG_VERSION[[:space:]]*:=[[:space:]]*//p' Makefile | head -1 | sed 's/.*-//' | xargs)
+          if [[ ! "${CURRENT_REV}" =~ ^[0-9]+$ ]]; then
+            CURRENT_REV=0
+          fi
+
+          NEW_PKG_VERSION="2.${BASE_VERSION}-$((CURRENT_REV + 1))"
+          sed -i "s/^PKG_VERSION[[:space:]]*:=.*/PKG_VERSION := ${NEW_PKG_VERSION}/" Makefile
+
+          git add Makefile
+          git commit -m "Sync upstream package files, package version ${NEW_PKG_VERSION} [skip ci]"
+          git push
+
+          echo "Synced upstream files, new package version: ${NEW_PKG_VERSION}"
+
+          # A push made with the default GITHUB_TOKEN never triggers other
+          # workflows, so the build has to be started explicitly.
+          gh workflow run build.yml --ref main
+          echo "Build workflow dispatched"
