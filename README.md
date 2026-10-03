@@ -31,8 +31,9 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 - Restart TorrServer from DSM
 
 ## Requirements
-
 - Synology DSM 7.0 or newer
+- Для DSM ниже 7.4. требуется python3. Поставьте с SynoCommunity.
+  
 - Supported architectures:
   - `amd64`
   - `arm64`
