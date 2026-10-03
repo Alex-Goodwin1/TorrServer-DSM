@@ -28,13 +28,38 @@ jobs:
           git remote add upstream https://github.com/vladlenas/TorrServer-DSM.git || true
           git fetch upstream
 
-      - name: Merge upstream changes
+      - name: Update non-conflicting files from upstream
         run: |
-          git merge upstream/main --allow-unrelated-histories --no-edit || {
-            echo "::warning::Merge conflict detected. Please resolve manually in the GitHub UI."
-            exit 0
-          }
+          FILES_TO_UPDATE=(
+            "src/helper/helper.py"
+            "src/helper/locales/en.json"
+            "src/helper/locales/lt.json"
+            "src/helper/locales/pl.json"
+            "src/helper/locales/ru.json"
+            "src/helper/locales/uk.json"
+            "src/scripts/certificate-helper"
+            "src/scripts/functions"
+            "src/scripts/installer"
+            "src/scripts/restart-package"
+            "src/scripts/service-setup"
+            "src/ui"
+            "src/nginx"
+            "src/conf"
+            "src/WIZARD_UIFILES"
+            "src/PACKAGE_ICON.PNG"
+            "src/PACKAGE_ICON_256.PNG"
+            "src/systemd"
+          )
+          
+          for file in "${FILES_TO_UPDATE[@]}"; do
+            if git ls-tree -r upstream/main --name-only | grep -q "^$file"; then
+              git checkout upstream/main -- "$file" || true
+            fi
+          done
+          
+          git add -A
+          git diff --staged --quiet || git commit -m "Sync helper scripts and UI from upstream"
 
       - name: Push changes
         run: |
-          git push origin main
+          git push origin main || echo "No changes to push"
