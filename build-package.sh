@@ -5,6 +5,15 @@ TORRSERVER_VERSION=$1
 ARCH=$2
 PKG_VERSION=$3
 
+# This repository is maintained through GitHub's web uploader, which does not
+# keep the executable bit (src/scripts/setup-permissions is stored as 100644
+# and file modes cannot be changed in the browser). The scripts that are copied
+# into the SPK - and src/INFO.sh, which is executed directly below - have to be
+# executable on the NAS, so restore the bits here instead of relying on the
+# modes that came with the checkout. DSM itself also runs
+# WIZARD_UIFILES/uninstall_uifile, so it must not be 644 either.
+chmod +x src/INFO.sh src/scripts/* src/WIZARD_UIFILES/* 2>/dev/null || true
+
 download_torrserver() {
     local base_url="https://github.com/YouROK/TorrServer/releases/download/${TORRSERVER_VERSION}"
     local bin_name="TorrServer-linux-${ARCH}"
