@@ -1,10 +1,9 @@
-### Generic variables and functions
-### -------------------------------
+#!/bin/sh
 
 if [ -z "${SYNOPKG_PKGNAME}" ] || [ -z "${SYNOPKG_DSM_VERSION_MAJOR}" ]; then
-  echo "Error: Environment variables are not set." 1>&2
-  echo "Please run me using synopkg instead. Example: \"synopkg start [packagename]\"" 1>&2
-  exit 1
+    echo "Error: Environment variables are not set." 1>&2
+    echo "Please run this script through synopkg." 1>&2
+    exit 1
 fi
 
 USER="TorrServer"
@@ -13,9 +12,7 @@ EFF_USER="TorrServer"
 LOG_FILE="/var/packages/${SYNOPKG_PKGNAME}/var/${SYNOPKG_PKGNAME}.log"
 PID_FILE="/var/packages/${SYNOPKG_PKGNAME}/var/${SYNOPKG_PKGNAME}.pid"
 CONFIG_DIR="/var/packages/${SYNOPKG_PKGNAME}/var"
-TORRSERVER_LOG="/var/packages/${SYNOPKG_PKGNAME}/var/TorrServer.log"
-SUDOERS_FILE="/etc/sudoers.d/TorrServer"
-RESTART_SCRIPT="/var/packages/${SYNOPKG_PKGNAME}/scripts/restart-package"
+TORRSERVER_LOG="${CONFIG_DIR}/TorrServer.log"
 CERTIFICATE_HELPER="/var/packages/${SYNOPKG_PKGNAME}/scripts/certificate-helper"
 
 TORRSERVER_PORT="8090"
@@ -33,16 +30,13 @@ if [ -r "${CONFIG_DIR}/torrserver.port" ]; then
 fi
 
 AUTH_ENABLED="0"
-if [ -r "${CONFIG_DIR}/torrserver.auth" ]; then
-    if [ "$(cat "${CONFIG_DIR}/torrserver.auth" 2>/dev/null)" = "1" ] &&
-       [ -r "${CONFIG_DIR}/accs.db" ]; then
-        AUTH_ENABLED="1"
-    fi
+if [ "$(cat "${CONFIG_DIR}/torrserver.auth" 2>/dev/null)" = "1" ] &&
+   [ -r "${CONFIG_DIR}/accs.db" ]; then
+    AUTH_ENABLED="1"
 fi
 
 HTTPS_ENABLED="0"
-if [ -r "${CONFIG_DIR}/torrserver.https" ] &&
-   [ "$(cat "${CONFIG_DIR}/torrserver.https" 2>/dev/null)" = "1" ]; then
+if [ "$(cat "${CONFIG_DIR}/torrserver.https" 2>/dev/null)" = "1" ]; then
     HTTPS_ENABLED="1"
 fi
 
@@ -64,56 +58,39 @@ TORRSERVER_SSL_ARGS=""
 if [ "${HTTPS_ENABLED}" = "1" ]; then
     TORRSERVER_SSL_ARGS="--ssl --sslport ${HTTPS_PORT}"
 
-    if [ -r "${CONFIG_DIR}/torrserver.force.https" ] &&
-       [ "$(cat "${CONFIG_DIR}/torrserver.force.https" 2>/dev/null)" = "1" ]; then
+    if [ "$(cat "${CONFIG_DIR}/torrserver.force.https" 2>/dev/null)" = "1" ]; then
         TORRSERVER_SSL_ARGS="${TORRSERVER_SSL_ARGS} --force-https"
     fi
 fi
 
-update_firewall_port ()
+update_firewall_port()
 {
-    local SC_FILE="${SYNOPKG_PKGDEST}/ui/TorrServer.sc"
-    local FIREWALL_PORTS="${TORRSERVER_PORT},8095"
+    local sc_file="${SYNOPKG_PKGDEST}/ui/TorrServer.sc"
+    local firewall_ports="${TORRSERVER_PORT},8095"
 
-if [ "${HTTPS_ENABLED}" = "1" ]; then
-    FIREWALL_PORTS="${FIREWALL_PORTS},${HTTPS_PORT}"
-fi
+    if [ "${HTTPS_ENABLED}" = "1" ]; then
+        firewall_ports="${firewall_ports},${HTTPS_PORT}"
+    fi
 
-FIREWALL_PORTS="${FIREWALL_PORTS}/tcp"
-
-    cat > "${SC_FILE}" <<EOF2
+    cat > "${sc_file}" <<EOF2
 [torrserver]
 title="TorrServer DSM"
 desc="TorrServer DSM"
 port_forward="yes"
-dst.ports="${FIREWALL_PORTS}"
+dst.ports="${firewall_ports}/tcp"
 EOF2
 
     /usr/syno/sbin/synopkghelper update "${SYNOPKG_PKGNAME}" port-config >/dev/null 2>&1
 }
 
-update_firewall_port
+if [ -d "${SYNOPKG_PKGDEST}/ui" ]; then
+    update_firewall_port
+fi
 
-# Ensure TorrServer can execute the two package helpers as root.
-# This is also done at startup so an upgrade cannot leave the package
-# without its sudoers entry.
-ensure_privileged_helpers ()
-{
-    /bin/mkdir -p /etc/sudoers.d
-
-    /bin/sh -c \
-        "printf '%s\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}' > '${SUDOERS_FILE}'"
-
-    /bin/chmod 0440 "${SUDOERS_FILE}"
-}
-
-ensure_privileged_helpers
-
-# Synchronize the selected TLS certificate/key before TorrServer starts.
 if [ -x "${CERTIFICATE_HELPER}" ]; then
     /bin/sudo -n "${CERTIFICATE_HELPER}" sync
     if [ "$?" -ne 0 ]; then
-        echo "Warning: TLS certificate synchronization failed." 1>&2
+        echo "Warning: TLS certificate synchronization is unavailable. Configure DSM permissions if required." 1>&2
     fi
 fi
 
@@ -128,44 +105,22 @@ fi
 SVC_BACKGROUND=y
 SVC_WRITE_PID=y
 
-service_postinst ()
+service_preupgrade()
 {
-    /bin/sudo -n /bin/mkdir -p /usr/local/lib/systemd/system
-
-    /bin/sudo -n /bin/cp \
-        "${SYNOPKG_PKGDEST}/systemd/TorrServer-restart.service" \
-        /usr/local/lib/systemd/system/TorrServer-restart.service
-
-    /bin/sudo -n /bin/chmod 0644 \
-        /usr/local/lib/systemd/system/TorrServer-restart.service
-
-    /bin/sudo -n /usr/bin/systemctl daemon-reload
-
-    /bin/sudo -n /bin/mkdir -p /etc/sudoers.d
-
-    /bin/sudo -n /bin/sh -c \
-        "printf '%s\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}' > '${SUDOERS_FILE}'"
-
-    /bin/sudo -n /bin/chmod 0440 "${SUDOERS_FILE}"
-}
-
-service_preupgrade ()
-{
-    if [ -d ${SYNOPKG_PKGDEST}/config/ -a "$(ls -A ${SYNOPKG_PKGDEST}/config/ 2>/dev/null)" ]; then
+    if [ -d "${SYNOPKG_PKGDEST}/config/" ] &&
+       [ "$(ls -A "${SYNOPKG_PKGDEST}/config/" 2>/dev/null)" ]; then
         if [ -r "${SYNOPKG_PKGDEST}/config/${SYNOPKG_PKGNAME}.sc" ]; then
-            $RM ${SYNOPKG_PKGDEST}/config/${SYNOPKG_PKGNAME}.sc | install_log
+            $RM "${SYNOPKG_PKGDEST}/config/${SYNOPKG_PKGNAME}.sc" | install_log
         fi
         echo "Backup target/config folder" | install_log
         echo "$RSYNC ${SYNOPKG_PKGDEST}/config/ ${TMP_DIR}" | install_log
-        $RSYNC ${SYNOPKG_PKGDEST}/config/ ${TMP_DIR} 2>&1 | install_log
+        $RSYNC "${SYNOPKG_PKGDEST}/config/" "${TMP_DIR}" 2>&1 | install_log
     fi
 }
 
-service_postuninst ()
+
+service_postupgrade()
 {
-    /bin/sudo -n "${RESTART_SCRIPT}" cleanup
-
-    if [ -f "${SUDOERS_FILE}" ]; then
-        rm -f "${SUDOERS_FILE}"
-    fi
+    /usr/syno/bin/synosystemctl reload nginx.service
 }
+

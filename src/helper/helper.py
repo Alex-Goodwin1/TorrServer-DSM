@@ -94,7 +94,11 @@ def localize_html(content):
 
     # Locale files use English source strings as keys. Replace only textual
     # strings; URLs, paths and program identifiers are intentionally untouched.
-    for source, translated in translations.items():
+    for source, translated in sorted(
+        translations.items(),
+        key=lambda item: len(item[0]),
+        reverse=True
+    ):
         if source and source != translated:
             content = content.replace(source, str(translated))
     return content
@@ -406,6 +410,23 @@ def get_ssl_paths():
     return read_file(SSL_CERT_FILE, "").strip(), read_file(SSL_KEY_FILE, "").strip()
 
 
+def has_privileged_access():
+    """Return True when the package can run its root-only certificate helper."""
+    if not os.path.isfile(CERTIFICATE_HELPER):
+        return False
+
+    try:
+        result = subprocess.run(
+            ["/bin/sudo", "-n", CERTIFICATE_HELPER],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def get_dsm_certificates():
     try:
         result = subprocess.run(
@@ -527,7 +548,8 @@ def restart_package():
     Start the package restart script through sudo.
 
     The restart-package script starts the external
-    TorrServer-restart.service, which is outside TorrServer.slice.
+    The package restart unit is outside TorrServer.slice, so the restart
+    operation survives the package stop.
     This keeps the restart operation alive after the package stops.
     """
 
@@ -755,6 +777,9 @@ def save_settings(params):
 
     if ssl_mode not in (SSL_CERT_MODE_SELF, SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL):
         return False, "Invalid certificate mode"
+
+    if ssl_mode in (SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL) and not has_privileged_access():
+        return False, "Additional DSM permissions are required for this certificate mode"
 
     if ssl_mode == SSL_CERT_MODE_MANUAL and (not ssl_cert or not ssl_key):
         return False, "Certificate and key paths are required"
@@ -1031,6 +1056,13 @@ button.secondary,
 button.danger,
 .button.danger {{
     background: #d32f2f;
+}}
+
+button.danger:disabled,
+.button.danger:disabled {{
+    background: #777;
+    opacity: 0.55;
+    cursor: not-allowed;
 }}
 
 .nav .button {{
@@ -1480,6 +1512,10 @@ pre {{
     box-shadow: 0 1px 3px rgba(30,50,80,.06);
     margin-bottom: 16px;
     overflow: hidden;
+}}
+
+.settings-card.disabled {{
+    opacity: 0.55;
 }}
 
 .settings-card-title {{
@@ -2027,6 +2063,35 @@ def main_page(host):
     return localize_html(body)
 
 
+def permissions_page():
+    body = page_header("DSM Permissions")
+    body += """
+<div class="card">
+    <h1>DSM permissions</h1>
+    <p>
+        TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.
+    </p>
+
+    <div class="notice">
+        <strong>One-time setup</strong><br>
+        Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:
+    </div>
+
+    <pre>/var/packages/TorrServer/scripts/setup-permissions</pre>
+
+    <div class="help">
+        After the task finishes, return to TorrServer Settings and click Check permissions.
+    </div>
+
+    <div class="actions">
+        <button type="button" onclick="window.close()">Close</button>
+    </div>
+</div>
+"""
+    body += page_footer()
+    return localize_html(body)
+
+
 def settings_page(message="", cache_path_override=""):
     port = get_port()
     auth = get_auth_enabled()
@@ -2037,14 +2102,8 @@ def settings_page(message="", cache_path_override=""):
     ssl_mode = get_ssl_mode()
     ssl_cert, ssl_key = get_ssl_paths()
     saved_username, saved_password = get_saved_account()
-    dsm_certs = get_dsm_certificates()
-
-    if not dsm_certs:
-        dsm_certs = [{
-            "label": "system (Certificate)",
-            "cert": "/usr/syno/etc/certificate/system/default/fullchain.pem",
-            "key": "/usr/syno/etc/certificate/system/default/privkey.pem",
-        }]
+    privileged = has_privileged_access()
+    dsm_certs = get_dsm_certificates() if privileged else []
 
     body = page_header("TorrServer Settings")
 
@@ -2060,14 +2119,51 @@ def settings_page(message="", cache_path_override=""):
 {language_selector}
 
 <div class="notice">
-<strong>After changing settings:</strong> first click <b>Save</b>, then click <b>Restart</b>.
+<strong>After changing settings:</strong> first click <b>Save</b>.
 <br>
-Some changes require a restart of the TorrServer service to take effect.
+{}
 </div>
-""".format(sidebar=app_sidebar("settings"), language_selector=language_selector())
+""".format(
+        "Some changes require a restart of the TorrServer service to take effect."
+        if privileged else
+        "Restart is unavailable until DSM permissions are configured.",
+        sidebar=app_sidebar("settings"),
+        language_selector=language_selector(),
+    )
 
     if message:
         body += '<div class="notice">{}</div>'.format(html.escape(message))
+
+    if privileged:
+        body += """
+<div class="settings-card">
+    <div class="settings-card-title">
+        <span class="metric-icon">✓</span>
+        <span>DSM permissions</span>
+    </div>
+    <div class="settings-card-body">
+        <div class="status-running">Extended DSM permissions are configured.</div>
+    </div>
+</div>
+"""
+    else:
+        body += """
+<div class="settings-card">
+    <div class="settings-card-title">
+        <span class="metric-icon">!</span>
+        <span>DSM permissions</span>
+    </div>
+    <div class="settings-card-body">
+        <div class="help">
+            Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.
+        </div>
+        <div class="actions">
+            <button type="button" onclick="openPermissions()">Setup permissions</button>
+            <button type="button" class="secondary" onclick="window.location.reload()">Check permissions</button>
+        </div>
+    </div>
+</div>
+"""
 
     body += """
 <div class="settings-layout">
@@ -2106,7 +2202,7 @@ Some changes require a restart of the TorrServer service to take effect.
 
         <div class="checkbox-row">
             <label>
-                <input type="checkbox" name="https" value="1" {} onchange="toggleHttps()">
+                <input type="checkbox" name="https" value="1" {} {} onchange="toggleHttps()">
                 Enable HTTPS
             </label>
         </div>
@@ -2126,7 +2222,7 @@ Some changes require a restart of the TorrServer service to take effect.
     </div>
 </div>
 
-<div class="settings-card">
+<div class="settings-card{}">
     <div class="settings-card-title">
         <span class="metric-icon">▣</span>
         <span>SSL Certificate</span>
@@ -2137,8 +2233,8 @@ Some changes require a restart of the TorrServer service to take effect.
             <label for="sslMode">Certificate source</label>
             <select name="ssl_mode" id="sslMode" onchange="toggleSslMode()">
                 <option value="self" {}>TorrServer self-signed</option>
-                <option value="dsm" {}>DSM certificate</option>
-                <option value="manual" {}>Manual paths</option>
+                <option value="dsm" {} {}>DSM certificate</option>
+                <option value="manual" {} {}>Manual paths</option>
             </select>
         </div>
 
@@ -2198,7 +2294,7 @@ Some changes require a restart of the TorrServer service to take effect.
 
     <div class="actions">
         <button type="submit">Save</button>
-        <button type="submit" formaction="./restart" class="danger">Restart</button>
+        <button type="submit" formaction="./restart" class="danger" {}>Restart</button>
     </div>
 </div>
 
@@ -2206,6 +2302,14 @@ Some changes require a restart of the TorrServer service to take effect.
 </div>
 
 <script>
+function openPermissions() {{
+    window.open(
+        './permissions',
+        'TorrServerPermissions',
+        'width=760,height=700,resizable=yes,scrollbars=yes'
+    );
+}}
+
 function toggleHttps() {{
     var enabled = document.querySelector('input[name="https"]').checked;
     document.getElementById('httpsPort').disabled = !enabled;
@@ -2280,12 +2384,16 @@ toggleAuth();
         port,
         html.escape(cache_path or "/volume1/downloads"),
         "checked" if https else "",
+        "disabled" if not privileged else "",
         https_port,
         "checked" if force_https else "",
         "" if https else "disabled",
+        " disabled" if not privileged else "",
         "selected" if ssl_mode == SSL_CERT_MODE_SELF else "",
         "selected" if ssl_mode == SSL_CERT_MODE_DSM else "",
+        "disabled" if not privileged else "",
         "selected" if ssl_mode == SSL_CERT_MODE_MANUAL else "",
+        "disabled" if not privileged else "",
         "".join(
             '<option value="{}|{}" {}>{}</option>'.format(
                 html.escape(item["cert"], quote=True),
@@ -2303,6 +2411,7 @@ toggleAuth();
         html.escape(PASSWORD_PLACEHOLDER if saved_password else "", quote=True),
         html.escape(PASSWORD_PLACEHOLDER if saved_password else "", quote=True),
         "" if auth else "disabled",
+        "" if privileged else "disabled",
     )
 
     body += page_footer()
@@ -2518,6 +2627,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(settings_page(cache_path_override=cache_path))
             return
 
+        if path == "/permissions":
+            self.send_html(permissions_page())
+            return
+
         if path == "/browse":
             query = parse_qs(parsed.query)
             selected_path = query.get("path", ["/"])[0]
@@ -2619,6 +2732,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/restart":
+            if not has_privileged_access():
+                self.send_html(
+                    localize_html(
+                        page_header("Restart Error")
+                        + """
+<div class="card">
+<h1>Restart unavailable</h1>
+<p>Restart is unavailable until DSM permissions are configured.</p>
+</div>
+"""
+                        + page_footer()
+                    ),
+                    403
+                )
+                return
+
             ok, message = restart_package()
 
             if ok:

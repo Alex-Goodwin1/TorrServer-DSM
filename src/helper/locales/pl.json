@@ -70,5 +70,20 @@
   "Disabled": "Wyłączone",
   "Open HTTP ↗": "Otwórz HTTP ↗",
   "Open HTTPS ↗": "Otwórz HTTPS ↗",
-  "Web UI": "Web UI"
+  "Web UI": "Web UI",
+  "DSM permissions": "Uprawnienia DSM",
+  "Extended DSM permissions are configured.": "Rozszerzone uprawnienia DSM są skonfigurowane.",
+  "Setup permissions": "Skonfiguruj uprawnienia",
+  "Check permissions": "Sprawdź uprawnienia",
+  "Additional DSM permissions are required for DSM and manual certificates.": "Certyfikaty DSM i ręczne wymagają dodatkowych uprawnień DSM.",
+  "DSM Permissions": "Uprawnienia DSM",
+  "One-time setup": "Jednorazowa konfiguracja",
+  "Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:": "Otwórz Harmonogram zadań w DSM i utwórz zadanie skryptu użytkownika. Wybierz użytkownika root i uruchom poniższe polecenie jeden raz:",
+  "After the task finishes, return to TorrServer Settings and click Check permissions.": "Po wykonaniu zadania wróć do ustawień TorrServer i kliknij „Sprawdź uprawnienia”.",
+  "Close": "Zamknij",
+  "Additional DSM permissions are required for this certificate mode": "Ten tryb certyfikatu wymaga dodatkowych uprawnień DSM.",
+  "Restart is unavailable until DSM permissions are configured.": "Ponowne uruchomienie jest niedostępne, dopóki uprawnienia DSM nie zostaną skonfigurowane.",
+  "Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "Rozszerzone uprawnienia DSM nie są skonfigurowane. TorrServer działa, ale synchronizacja certyfikatów i ponowne uruchamianie z Ustawień jest niedostępne.",
+  "TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.": "TorrServer działa bez dodatkowych uprawnień. Dostęp root jest wymagany tylko do automatycznej synchronizacji certyfikatów i ponownego uruchamiania TorrServer z Ustawień.",
+  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer działa, ale synchronizacja certyfikatów i ponowne uruchamianie z Ustawień są niedostępne."
 }

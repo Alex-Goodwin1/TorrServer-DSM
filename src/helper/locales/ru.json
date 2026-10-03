@@ -70,5 +70,20 @@
   "Disabled": "Выключено",
   "Open HTTP ↗": "Открыть HTTP ↗",
   "Open HTTPS ↗": "Открыть HTTPS ↗",
-  "Web UI": "Web UI"
+  "Web UI": "Web UI",
+  "DSM permissions": "Права DSM",
+  "Extended DSM permissions are configured.": "Расширенные права DSM настроены.",
+  "Setup permissions": "Настроить права",
+  "Check permissions": "Проверить права",
+  "Additional DSM permissions are required for DSM and manual certificates.": "Для сертификатов DSM и ручных сертификатов требуются дополнительные права DSM.",
+  "DSM Permissions": "Права DSM",
+  "One-time setup": "Однократная настройка",
+  "Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:": "Откройте Диспетчер задач в DSM и создайте задачу «Пользовательский сценарий». В качестве пользователя выберите root и один раз запустите следующую команду:",
+  "After the task finishes, return to TorrServer Settings and click Check permissions.": "После выполнения вернитесь в настройки TorrServer и нажмите «Проверить права».",
+  "Close": "Закрыть",
+  "Additional DSM permissions are required for this certificate mode": "Для этого режима сертификата требуются дополнительные права DSM.",
+  "Restart is unavailable until DSM permissions are configured.": "Перезапуск недоступен, пока не настроены права DSM.",
+  "Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "Расширенные права DSM не настроены. TorrServer продолжает работать, но синхронизация сертификатов и перезапуск из Настроек недоступны.",
+  "TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.": "TorrServer работает без дополнительных прав. Доступ root требуется только для автоматической синхронизации сертификатов и перезапуска TorrServer из Настроек.",
+  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer продолжает работать, но синхронизация сертификатов и перезапуск из Настроек недоступны."
 }

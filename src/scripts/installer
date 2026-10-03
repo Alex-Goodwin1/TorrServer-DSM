@@ -8,9 +8,6 @@
 # installer log is not writable, use for reference only.
 INST_LOG="/var/log/packages/${SYNOPKG_PKGNAME}.log"
 
-# Optional FWPORTS file
-FWPORTS_FILE="/var/packages/${SYNOPKG_PKGNAME}/conf/${SYNOPKG_PKGNAME}.sc"
-
 # Temporary directory when the package is upgrading
 TMP_DIR="${SYNOPKG_TEMP_UPGRADE_FOLDER}"
 
@@ -68,74 +65,24 @@ if [ -r "${SVC_SETUP}" ]; then
 fi
 
 
-# Initialize package variables from the package-specific setup only.
-call_func "initialize_variables"
-
-
-### Functions library
-
-#
-# syncronize all files from var folder in spk (extracted to target/var)
-# (@appdata) /var/packages/<package>/target/var -> /var/packages/<package>/var
-#
-syno_sync_var_folder () {
-    # take all files that do not alredy exist and rename the other files to *.new to avoid overwriting
-    # existing configuration files.
-    # finally remove the target/var folder that is not used under DSM 7.
-    if [ -d ${SYNOPKG_PKGDEST}/var -a "$(ls -A ${SYNOPKG_PKGDEST}/var 2>/dev/null)" ]; then
-    
+# Synchronize files shipped in target/var into DSM 7 persistent package data.
+syno_sync_var_folder ()
+{
+    if [ -d "${SYNOPKG_PKGDEST}/var" ] &&
+       [ "$(ls -A "${SYNOPKG_PKGDEST}/var" 2>/dev/null)" ]; then
         echo "Install files from var folder"
-    
-        # Move all files except existing
+
         echo "$RSYNC --ignore-existing --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}"
-        $RSYNC --ignore-existing --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}
+        $RSYNC --ignore-existing --remove-source-files "${SYNOPKG_PKGDEST}/var/" "${SYNOPKG_PKGVAR}"
 
-        # Rename any remaining (thus pre-existing) files with .new suffix
-        find ${SYNOPKG_PKGDEST}/var -type f -exec sh -c 'x="{}"; mv "$x" "${x}.new"' \;
+        find "${SYNOPKG_PKGDEST}/var" -type f -exec sh -c 'x="$1"; mv "$x" "${x}.new"' sh {} \;
 
-        # Move .new files (overwrite existing)
         echo "$RSYNC --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}"
-        $RSYNC --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}
+        $RSYNC --remove-source-files "${SYNOPKG_PKGDEST}/var/" "${SYNOPKG_PKGVAR}"
 
-        # Remove var folder extraced from spk
-        $RM ${SYNOPKG_PKGDEST}/var
+        $RM "${SYNOPKG_PKGDEST}/var"
     fi
 }
-
-set_unix_permissions ()
-{
-    echo "Notice: set_unix_permissions() is no longer required on DSM7."
-}
-
-syno_remove_user ()
-{
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. syno_remove_user() is no longer supported."
-}
-
-syno_group_create ()
-{
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. syno_group_create() is no longer supported."
-}
-
-syno_group_remove ()
-{
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. syno_group_remove() is no longer supported."
-}
-
-syno_user_add_to_group ()
-{
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. syno_user_add_to_group() is no longer supported."
-}
-
-set_syno_permissions ()
-{
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. set_syno_permissions() is no longer supported."
-}
-
-syno_user_add_to_legacy_group () {
-    echo "${SYNOPKG_PKGNAME} has not been updated to DSM7 yet. syno_user_add_to_legacy_group() is no longer supported."
-}
-
 
 ### Generic package behaviors
 
@@ -179,16 +126,17 @@ postuninst ()
 
     if [ "$wizard_delete_data" = "true" ]; then
         echo "Removing files..." | install_log
-        if [ "$(ls -A ${SYNOPKG_PKGHOME})" != "" ]; then
-            find ${SYNOPKG_PKGHOME} -mindepth 1 -delete -print | install_log
+        if [ -d "${SYNOPKG_PKGHOME}" ] && [ "$(ls -A "${SYNOPKG_PKGHOME}" 2>/dev/null)" ]; then
+            find "${SYNOPKG_PKGHOME}" -mindepth 1 -delete -print | install_log
         fi
 
-        if [ "$(ls -A ${SYNOPKG_PKGVAR})" != "" ]; then
-            find ${SYNOPKG_PKGVAR} -mindepth 1 -delete -print | install_log
+        if [ -d "${SYNOPKG_PKGVAR}" ] && [ "$(ls -A "${SYNOPKG_PKGVAR}" 2>/dev/null)" ]; then
+            find "${SYNOPKG_PKGVAR}" -mindepth 1 -delete -print | install_log
         fi
 
-        if [ "$(ls -A /var/packages/${SYNOPKG_PKGNAME}/etc)" != "" ]; then
-            find /var/packages/${SYNOPKG_PKGNAME}/etc -mindepth 1 -delete -print | install_log
+        ETC_DIR="/var/packages/${SYNOPKG_PKGNAME}/etc"
+        if [ -d "${ETC_DIR}" ] && [ "$(ls -A "${ETC_DIR}" 2>/dev/null)" ]; then
+            find "${ETC_DIR}" -mindepth 1 -delete -print | install_log
         fi
     fi
     exit 0

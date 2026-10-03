@@ -70,5 +70,20 @@
   "Disabled": "Išjungta",
   "Open HTTP ↗": "Atidaryti HTTP ↗",
   "Open HTTPS ↗": "Atidaryti HTTPS ↗",
-  "Web UI": "Web UI"
+  "Web UI": "Web UI",
+  "DSM permissions": "DSM teisės",
+  "Extended DSM permissions are configured.": "Išplėstinės DSM teisės sukonfigūruotos.",
+  "Setup permissions": "Nustatyti teises",
+  "Check permissions": "Patikrinti teises",
+  "Additional DSM permissions are required for DSM and manual certificates.": "DSM ir rankiniams sertifikatams reikalingos papildomos DSM teisės.",
+  "DSM Permissions": "DSM teisės",
+  "One-time setup": "Vienkartinė sąranka",
+  "Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:": "DSM atidarykite Užduočių planuoklę ir sukurkite vartotojo scenarijaus užduotį. Pasirinkite root naudotoją ir vieną kartą paleiskite šią komandą:",
+  "After the task finishes, return to TorrServer Settings and click Check permissions.": "Baigę grįžkite į TorrServer nustatymus ir pasirinkite „Patikrinti teises“.",
+  "Close": "Uždaryti",
+  "Additional DSM permissions are required for this certificate mode": "Šiam sertifikato režimui reikalingos papildomos DSM teisės.",
+  "Restart is unavailable until DSM permissions are configured.": "Paleidimas iš naujo nepasiekiamas, kol nesukonfigūruotos DSM teisės.",
+  "Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "Išplėstinės DSM teisės nesukonfigūruotos. TorrServer veikia, tačiau sertifikatų sinchronizavimas ir paleidimas iš naujo per Nustatymus nepasiekiami.",
+  "TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.": "TorrServer veikia be papildomų teisių. Root prieiga reikalinga tik automatiniam sertifikatų sinchronizavimui ir TorrServer paleidimui iš naujo per Nustatymus.",
+  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer veikia, tačiau sertifikatų sinchronizavimas ir paleidimas iš naujo per Nustatymus nepasiekiami."
 }
