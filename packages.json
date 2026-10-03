@@ -2,7 +2,7 @@
   "packages": [
     {
       "package": "TorrServer",
-      "version": "1.4.145.UN.70",
+      "version": "2.145.1-70",
       "displayname": "TorrServer DSM",
       "description": "TorrServer DSM + Android Client (Uncensored build)",
       "arch": "x86_64 aarch64 armv7",
