@@ -17,7 +17,7 @@ download_torrserver() {
     fi
 
     echo ">>> Downloading TorrServer-linux-${ARCH}:"
-    mkdir -p ${dest_bin}
+    mkdir -p "${dest_bin}"
     wget -q -P ${dest_bin} ${src_bin}
 }
 
@@ -70,48 +70,46 @@ make_inner_pkg() {
 
     echo ">>> Making inner package.tgz"
 
-    mkdir -p ${tmp_dir}/bin
+    mkdir -p "${tmp_dir}/bin"
 
-    cp -a ${torrserver_bin} ${tmp_dir}/bin/TorrServer
-    cp -a ${ffprobe_bin} ${tmp_dir}/bin/ffprobe
+    cp -a "${torrserver_bin}" "${tmp_dir}/bin/TorrServer"
+    cp -a "${ffprobe_bin}" "${tmp_dir}/bin/ffprobe"
 
-    chmod +x ${tmp_dir}/bin/*
+    chmod +x "${tmp_dir}"/bin/*
 
-    cp -r src/ui ${tmp_dir}
-    mkdir -p ${tmp_dir}/systemd
-    cp src/systemd/TorrServer-restart.service ${tmp_dir}/systemd/
-    cp -r src/nginx ${tmp_dir}
-    rm -rf ${tmp_dir}/helper
-    cp -a src/helper ${tmp_dir}/helper
-    rm -rf ${tmp_dir}/helper/__pycache__
-    chmod +x ${tmp_dir}/helper/helper.py
+    cp -r src/ui "${tmp_dir}"
+    cp -r src/nginx "${tmp_dir}"
+    rm -rf "${tmp_dir}/helper"
+    cp -a src/helper "${tmp_dir}/helper"
+    rm -rf "${tmp_dir}/helper"/__pycache__
+    chmod +x "${tmp_dir}/helper/helper.py"
 
     pkg_size=$(du -sk "${tmp_dir}" | awk '{print $1}')
     echo "${pkg_size}" >>"$dest_dir/extractsize_tmp"
 
-    ls --color=no $tmp_dir | tar -cJf $dest_pkg -C "$tmp_dir" -T /dev/stdin
+    find "${tmp_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | tar -cJf "${dest_pkg}" -C "${tmp_dir}" -T /dev/stdin
 }
 
 make_spk() {
     local spk_tmp_dir=$1
     local spk_dest_dir="./spk"
-    local pkg_size=$(cat ${spk_tmp_dir}/extractsize_tmp)
+    local pkg_size=$(cat "${spk_tmp_dir}/extractsize_tmp")
     local spk_filename="TorrServer-DSM-${TORRSERVER_VERSION}-${ARCH}.spk"
 
     echo ">>> Making spk: ${spk_filename}"
 
-    mkdir -p ${spk_dest_dir}
-    rm "${spk_tmp_dir}/extractsize_tmp"
+    mkdir -p "${spk_dest_dir}"
+    rm -f "${spk_tmp_dir}/extractsize_tmp"
 
-    cp -r src/scripts $spk_tmp_dir
-    cp -r src/PACKAGE_ICON_256.PNG $spk_tmp_dir
-    cp -r src/PACKAGE_ICON.PNG $spk_tmp_dir
-    cp -r src/conf/ $spk_tmp_dir
-    cp -r src/WIZARD_UIFILES $spk_tmp_dir
+    cp -r src/scripts "${spk_tmp_dir}"
+    cp -r src/PACKAGE_ICON_256.PNG "${spk_tmp_dir}"
+    cp -r src/PACKAGE_ICON.PNG "${spk_tmp_dir}"
+    cp -r src/conf/ "${spk_tmp_dir}"
+    cp -r src/WIZARD_UIFILES "${spk_tmp_dir}"
 
-    ./src/INFO.sh ${PKG_VERSION} ${ARCH} ${pkg_size} >"${spk_tmp_dir}"/INFO
+    ./src/INFO.sh "${PKG_VERSION}" "${ARCH}" "${pkg_size}" >"${spk_tmp_dir}/INFO"
 
-    tar -cf "${spk_dest_dir}/${spk_filename}" -C "${spk_tmp_dir}" $(ls ${spk_tmp_dir})
+    find "${spk_tmp_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | tar -cf "${spk_dest_dir}/${spk_filename}" -C "${spk_tmp_dir}" -T /dev/stdin
 }
 
 make_pkg() {
