@@ -6,6 +6,16 @@ PKG_VERSION="${1:?Package version is required}"
 ARCH="${2:?Architecture is required}"
 PKG_SIZE="${3:?Package size is required}"
 
+# Synology only accepts a numeric version, optionally with a numeric revision:
+#   <major>.<minor>.<build>[-<revision>]      e.g. 2.145.1-70
+# Anything else (letters, spaces, ...) makes Package Center abort the install
+# with "Invalid file format" / "Неверный формат файла".
+if ! [[ "${PKG_VERSION}" =~ ^[0-9]+(\.[0-9]+)*(-[0-9]+)?$ ]]; then
+    echo "ERROR: Invalid package version '${PKG_VERSION}'." >&2
+    echo "Synology requires a numeric version such as 2.145.1-70 (letters are not allowed)." >&2
+    exit 1
+fi
+
 TIMESTAMP="$(date -u +%Y%m%d-%H:%M:%S)"
 
 # Modified to support DSM 7.0 and newer.
