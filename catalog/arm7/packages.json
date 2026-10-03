@@ -1,0 +1,37 @@
+{
+  "packages": [
+    {
+      "package": "TorrServer",
+      "version": "2.145.1-70",
+      "dname": "TorrServer DSM",
+      "desc": "TorrServer, torrent to http (Uncensored build)",
+      "link": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.1-70/TorrServer-DSM-MatriX.145.1-arm7.spk",
+      "size": 32768000,
+      "md5": "5ff11582013835f7d6c5d48a28b84f64",
+      "arch": "armv7",
+      "qinst": true,
+      "qstart": true,
+      "qupgrade": true,
+      "beta": false,
+      "start": true,
+      "thirdparty": true,
+      "silent_install": true,
+      "silent_uninstall": true,
+      "silent_upgrade": true,
+      "maintainer": "TorrServer",
+      "maintainer_url": "https://github.com/YouROK/TorrServer",
+      "distributor": "Alex-Goodwin1",
+      "distributor_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM",
+      "support_url": "https://github.com/Alex-Goodwin1/TorrServer-DSM",
+      "category": 0,
+      "subcategory": 0,
+      "type": 0,
+      "changelog": "",
+      "thumbnail": [
+        "https://raw.githubusercontent.com/Alex-Goodwin1/TorrServer-DSM/main/src/ui/images/torrserver-72.png",
+        "https://raw.githubusercontent.com/Alex-Goodwin1/TorrServer-DSM/main/src/ui/images/torrserver-256.png"
+      ],
+      "snapshot": []
+    }
+  ]
+}

@@ -310,6 +310,7 @@ jobs:
           platform_by_arch = {"amd64": "x86_64", "arm64": "aarch64", "arm7": "armv7"}
 
           packages = []
+          entries = {}
           for arch, platform in platform_by_arch.items():
               spks = sorted(pathlib.Path("artifacts/spk").glob(f"*-{arch}.spk"))
               if not spks:
@@ -317,56 +318,73 @@ jobs:
 
               spk = spks[0]
               blob = spk.read_bytes()
-              packages.append(
-                  {
-                      "package": "TorrServer",
-                      "version": version,
-                      "dname": "TorrServer DSM",
-                      "desc": "TorrServer, torrent to http (Uncensored build)",
-                      "link": f"{base}/releases/download/{tag}/{spk.name}",
-                      "size": len(blob),
-                      "md5": hashlib.md5(blob).hexdigest(),
-                      "arch": platform,
-                      "qinst": True,
-                      "qstart": True,
-                      "qupgrade": True,
-                      "beta": False,
-                      "start": True,
-                      "thirdparty": True,
-                      "silent_install": True,
-                      "silent_uninstall": True,
-                      "silent_upgrade": True,
-                      "maintainer": "TorrServer",
-                      "maintainer_url": "https://github.com/YouROK/TorrServer",
-                      "distributor": "Alex-Goodwin1",
-                      "distributor_url": base,
-                      "support_url": base,
-                      "category": 0,
-                      "subcategory": 0,
-                      "type": 0,
-                      "changelog": "",
-                      "thumbnail": [
+              entry = {
+                  "package": "TorrServer",
+                  "version": version,
+                  "dname": "TorrServer DSM",
+                  "desc": "TorrServer, torrent to http (Uncensored build)",
+                  "link": f"{base}/releases/download/{tag}/{spk.name}",
+                  "size": len(blob),
+                  "md5": hashlib.md5(blob).hexdigest(),
+                  "arch": platform,
+                  "qinst": True,
+                  "qstart": True,
+                  "qupgrade": True,
+                  "beta": False,
+                  "start": True,
+                  "thirdparty": True,
+                  "silent_install": True,
+                  "silent_uninstall": True,
+                  "silent_upgrade": True,
+                  "maintainer": "TorrServer",
+                  "maintainer_url": "https://github.com/YouROK/TorrServer",
+                  "distributor": "Alex-Goodwin1",
+                  "distributor_url": base,
+                  "support_url": base,
+                  "category": 0,
+                  "subcategory": 0,
+                  "type": 0,
+                  "changelog": "",
+                  "thumbnail": [
                           f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-72.png",
                           f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-256.png",
-                      ],
-                      "snapshot": [],
-                  }
-              )
+                  ],
+                  "snapshot": [],
+              }
+              packages.append(entry)
+              entries[arch] = entry
               print(f"packages.json <- {spk.name} ({len(blob)} bytes, md5 {hashlib.md5(blob).hexdigest()})")
 
           pathlib.Path("packages.json").write_text(
               json.dumps({"packages": packages}, indent=2) + "\n", encoding="utf-8"
           )
+
+          # Package Center filters packages by architecture only when the
+          # repository server does it (Synology's own catalog is queried with
+          # arch/unique/build parameters). A file on GitHub Pages is served as
+          # is, so the same release is published per architecture as well: one
+          # entry each, which removes any ambiguity about which .spk belongs to
+          # the NAS and lets Package Center show exactly one TorrServer.
+          for arch, entry in entries.items():
+              catalog = pathlib.Path("catalog") / arch / "packages.json"
+              catalog.parent.mkdir(parents=True, exist_ok=True)
+              catalog.write_text(
+                  json.dumps({"packages": [entry]}, indent=2) + "\n", encoding="utf-8"
+              )
+              print(f"catalog/{arch}/packages.json <- {entry['link'].rsplit('/', 1)[-1]}")
           PY
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet -- packages.json; then
-            echo "packages.json already describes the built SPKs"
+          # packages.json is already tracked while catalog/ may contain brand new
+          # files, so stage both and compare the index instead of the work tree.
+          git add packages.json catalog
+
+          if git diff --cached --quiet; then
+            echo "packages.json and catalog/ already describe the built SPKs"
           else
-            git add packages.json
-            git commit -m "Update packages.json to ${VERSION} [skip ci]"
+            git commit -m "Update package source to ${VERSION} [skip ci]"
             git push
           fi
 

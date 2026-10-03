@@ -45,7 +45,7 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 2. Нажмите **Настройки** (иконка шестеренки) → вкладка **Источники пакетов**.
 3. Нажмите **Добавить**:
    - **Имя:** `TorrServer Uncensored`
-   - **Расположение:** `https://alex-goodwin1.github.io/TorrServer-DSM/`
+   - **Расположение:** `https://alex-goodwin1.github.io/TorrServer-DSM/packages.json`
 4. Нажмите **ОК**.
 
 Теперь при появлении новой версии в разделе "Обновления" Центра пакетов появится кнопка **Обновить**.
