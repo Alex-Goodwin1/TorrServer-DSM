@@ -15,6 +15,60 @@ CONFIG_DIR="/var/packages/${SYNOPKG_PKGNAME}/var"
 TORRSERVER_LOG="${CONFIG_DIR}/TorrServer.log"
 CERTIFICATE_HELPER="/var/packages/${SYNOPKG_PKGNAME}/scripts/certificate-helper"
 
+# ---------------------------------------------------------------------------
+# DSM 7.0 and newer compatibility helpers
+#
+# DSM ships different helpers depending on the release:
+#   * the Python 3 interpreter sits elsewhere on every release
+#     (/bin/python3, /usr/bin/python3, /usr/local/bin/python3),
+#   * third-party repositories install it somewhere else again: the
+#     SynoCommunity packages python311/python312/python313 publish the
+#     interpreter through SPK_USR_LOCAL_LINKS in /usr/local/bin/python3.<minor>
+#     and keep the real binary in /var/packages/<pkg>/target/bin, while Entware
+#     (opkg) installs it in /opt/bin,
+#   * synopkghelper / synosystemctl / sudo are not guaranteed to live in the
+#     same directory on every DSM 7 release.
+# Resolve every tool at runtime instead of hardcoding paths that only exist on
+# the newest DSM builds, so a missing tool degrades gracefully instead of
+# breaking the package installation.
+# ---------------------------------------------------------------------------
+find_binary()
+{
+    for _candidate in "$@"; do
+        if [ -x "${_candidate}" ]; then
+            printf '%s\n' "${_candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_python()
+{
+    # helper.py imports http.server and ssl while it loads, so an interpreter
+    # without those modules (for example Entware's minimal python3-light) can
+    # never serve the UI. Such candidates are skipped here instead of being
+    # started and left to crash on the first request.
+    for _candidate in /bin/python3 /usr/bin/python3 /usr/local/bin/python3 \
+                      /bin/python3.* /usr/bin/python3.* /usr/local/bin/python3.* \
+                      /var/packages/Python*/target/bin/python3* \
+                      /var/packages/python3*/target/bin/python3* \
+                      /opt/bin/python3 /opt/bin/python3.* \
+                      /usr/local/bin/python /opt/bin/python; do
+        [ -x "${_candidate}" ] || continue
+        if "${_candidate}" -c 'import http.server, ssl, sys; raise SystemExit(0 if sys.version_info >= (3, 7) else 1)' >/dev/null 2>&1; then
+            printf '%s\n' "${_candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PYTHON_BIN="$(find_python || true)"
+SYNOPKGHELPER_BIN="$(find_binary /usr/syno/sbin/synopkghelper /usr/syno/bin/synopkghelper || true)"
+SYNOPKGCTL_BIN="$(find_binary /usr/syno/bin/synosystemctl /usr/bin/systemctl /bin/systemctl || true)"
+SUDO_BIN="$(find_binary /bin/sudo /usr/bin/sudo /usr/local/bin/sudo || true)"
+
 TORRSERVER_PORT="8090"
 if [ -r "${CONFIG_DIR}/torrserver.port" ]; then
     SAVED_PORT="$(cat "${CONFIG_DIR}/torrserver.port" 2>/dev/null)"
@@ -80,26 +134,37 @@ port_forward="yes"
 dst.ports="${firewall_ports}/tcp"
 EOF2
 
-    /usr/syno/sbin/synopkghelper update "${SYNOPKG_PKGNAME}" port-config >/dev/null 2>&1
+    if [ -n "${SYNOPKGHELPER_BIN}" ]; then
+        "${SYNOPKGHELPER_BIN}" update "${SYNOPKG_PKGNAME}" port-config >/dev/null 2>&1 || true
+    fi
 }
 
 if [ -d "${SYNOPKG_PKGDEST}/ui" ]; then
     update_firewall_port
 fi
 
-if [ -x "${CERTIFICATE_HELPER}" ]; then
-    /bin/sudo -n "${CERTIFICATE_HELPER}" sync
-    if [ "$?" -ne 0 ]; then
+if [ -n "${SUDO_BIN}" ] && [ -x "${CERTIFICATE_HELPER}" ]; then
+    if ! "${SUDO_BIN}" -n "${CERTIFICATE_HELPER}" sync >/dev/null 2>&1; then
         echo "Warning: TLS certificate synchronization is unavailable. Configure DSM permissions if required." 1>&2
     fi
 fi
 
+TORRSERVER_ARGS="-d ${SYNOPKG_PKGVAR} -p ${TORRSERVER_PORT} ${TORRSERVER_SSL_ARGS} -l ${TORRSERVER_LOG}"
 if [ "${AUTH_ENABLED}" = "1" ]; then
-    SERVICE_COMMAND="/bin/python3 ${SYNOPKG_PKGDEST}/helper/helper.py
-${SYNOPKG_PKGDEST}/bin/TorrServer -d ${SYNOPKG_PKGVAR} -p ${TORRSERVER_PORT} -a ${TORRSERVER_SSL_ARGS} -l ${TORRSERVER_LOG}"
+    TORRSERVER_ARGS="-a ${TORRSERVER_ARGS}"
+fi
+
+# The helper serves the DSM UI on port 8095 and must keep running, so it is
+# started as the first background command (start-stop-status starts every line
+# of SERVICE_COMMAND separately). Without a Python 3 interpreter the server
+# still runs, only the DSM UI page is unavailable.
+if [ -n "${PYTHON_BIN}" ]; then
+    SERVICE_COMMAND="${PYTHON_BIN} ${SYNOPKG_PKGDEST}/helper/helper.py
+${SYNOPKG_PKGDEST}/bin/TorrServer ${TORRSERVER_ARGS}"
 else
-    SERVICE_COMMAND="/bin/python3 ${SYNOPKG_PKGDEST}/helper/helper.py
-${SYNOPKG_PKGDEST}/bin/TorrServer -d ${SYNOPKG_PKGVAR} -p ${TORRSERVER_PORT} ${TORRSERVER_SSL_ARGS} -l ${TORRSERVER_LOG}"
+    echo "Warning: no usable Python 3 (>= 3.7 with ssl) found; the TorrServer DSM UI (helper) will be unavailable." 1>&2
+    echo "Warning: install the SynoCommunity python311/python312/python313 package (or Entware python3), or link an interpreter to /usr/local/bin/python3." 1>&2
+    SERVICE_COMMAND="${SYNOPKG_PKGDEST}/bin/TorrServer ${TORRSERVER_ARGS}"
 fi
 
 SVC_BACKGROUND=y
@@ -121,6 +186,14 @@ service_preupgrade()
 
 service_postupgrade()
 {
-    /usr/syno/bin/synosystemctl reload nginx.service
+    # nginx has to pick up the helper proxy configuration. The command name
+    # differs between DSM releases, and a failure here must never abort the
+    # package upgrade.
+    if [ -n "${SYNOPKGCTL_BIN}" ]; then
+        "${SYNOPKGCTL_BIN}" reload nginx.service >/dev/null 2>&1 ||
+            "${SYNOPKGCTL_BIN}" reload nginx >/dev/null 2>&1 || true
+    fi
+
+    return 0
 }
 

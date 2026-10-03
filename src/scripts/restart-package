@@ -1,5 +1,14 @@
 #!/bin/sh
 
+# Restart helper used by the DSM UI (helper.py).
+# Preferred path: the systemd unit shipped through conf/ ("systemd-unit"
+# resource). Fallback: let Package Center restart the package, which works on
+# every DSM 7 release even when systemd is not reachable for the package user.
+
 UNIT="pkg-TorrServer-restart.service"
 
-exec /usr/bin/systemctl start "${UNIT}"
+if [ -x /usr/bin/systemctl ] && /usr/bin/systemctl start "${UNIT}" >/dev/null 2>&1; then
+    exit 0
+fi
+
+exec /usr/syno/bin/synopkg restart TorrServer
