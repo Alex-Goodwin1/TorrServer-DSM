@@ -133,8 +133,13 @@ jobs:
           echo "Building linux/arm64..."
           build_target linux arm64 "" "$DEST_DIR/TorrServer-linux-arm64"
           
-          echo "Building linux/arm7..."
-          build_target linux arm7 7 "$DEST_DIR/TorrServer-linux-arm7"
+          # 32 bit ARM is GOARCH=arm together with GOARM=7: "arm7" is not a
+          # GOARCH value and makes the toolchain die with
+          # "go: unsupported GOOS/GOARCH pair linux/arm7". The output file keeps
+          # the arm7 name because that is the arch name build-package.sh and
+          # src/INFO.sh use for the DSM platform list.
+          echo "Building linux/arm (GOARM=7)..."
+          build_target linux arm 7 "$DEST_DIR/TorrServer-linux-arm7"
           
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
@@ -182,7 +187,7 @@ jobs:
           # build-package.sh runs src/INFO.sh directly and ships src/scripts
           # as-is, so the executable bits are restored here rather than relying
           # on the git mode surviving an upload through the browser.
-          chmod +x build-package.sh src/INFO.sh src/scripts/* 2>/dev/null || true
+          chmod +x build-package.sh src/INFO.sh src/scripts/* src/WIZARD_UIFILES/* 2>/dev/null || true
           make
 
       - name: Validate SPK metadata
@@ -203,6 +208,31 @@ jobs:
               echo "::error::Package Center rejects non numeric versions - ${spk} carries '${version}'"
               exit 1
             fi
+
+            # A script without the executable bit cannot be run by DSM, and the
+            # web uploader quietly stores new files as 644, so check the modes
+            # that actually ended up inside the package instead of trusting git.
+            outer=$(tar -tvf "${spk}" | awk '{print $1" "$NF}')
+            for member in scripts/setup-permissions scripts/start-stop-status WIZARD_UIFILES/uninstall_uifile; do
+              case "${outer}" in
+                *"-rwxr-xr-x ${member}"*) ;;
+                *)
+                  echo "::error::${spk}: ${member} is not executable inside the SPK"
+                  exit 1
+                  ;;
+              esac
+            done
+
+            inner=$(tar -xOf "${spk}" package.tgz | tar -tJv | awk '{print $1" "$NF}')
+            for member in bin/TorrServer bin/ffprobe helper/helper.py; do
+              case "${inner}" in
+                *"-rwxr-xr-x ${member}"*) ;;
+                *)
+                  echo "::error::${spk}: ${member} is not executable inside package.tgz"
+                  exit 1
+                  ;;
+              esac
+            done
           done
 
       - name: List build results
@@ -247,37 +277,93 @@ jobs:
           echo "Files:"
           ls -lh artifacts/
 
-      - name: Update packages.json
+      - name: Generate packages.json for the DSM package source
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          cat <<EOF > packages.json
-          {
-            "packages": [
-              {
-                "package": "TorrServer",
-                "version": "${VERSION}",
-                "displayname": "TorrServer DSM",
-                "description": "TorrServer DSM + Android Client (Uncensored build)",
-                "arch": "x86_64 aarch64 armv7",
-                "maintainer": "Alex-Goodwin1",
-                "distributor": "Alex-Goodwin1",
-                "distributor_url": "https://github.com/${{ github.repository }}",
-                "category": "download",
-                "beta": false,
-                "startable": true,
-                "installable": true,
-                "uninstallable": true
-              }
-            ]
-          }
-          EOF
+          # A DSM package source is not a free-form list: every entry has to
+          # point at a real .spk ("link") and carry that file's exact "size" and
+          # "md5", otherwise Package Center can neither download nor verify the
+          # package. The key names below follow Synology's own repository format
+          # (as documented by the reverse engineered "sspks" implementation).
+          # The file is written while the freshly built SPKs are still local, so
+          # it can never advertise a download that does not exist.
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          version = os.environ["VERSION"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          base = f"https://github.com/{repo}"
+          tag = f"v{version}"
+
+          # build-package.sh writes TorrServer-DSM-<torrserver version>-<arch>.spk
+          # for every arch of the Makefile; the platform names Package Center
+          # knows are a different spelling of those same three builds.
+          platform_by_arch = {"amd64": "x86_64", "arm64": "aarch64", "arm7": "armv7"}
+
+          packages = []
+          for arch, platform in platform_by_arch.items():
+              spks = sorted(pathlib.Path("artifacts/spk").glob(f"*-{arch}.spk"))
+              if not spks:
+                  raise SystemExit(f"::error::No SPK for {arch} found in artifacts/spk")
+
+              spk = spks[0]
+              blob = spk.read_bytes()
+              packages.append(
+                  {
+                      "package": "TorrServer",
+                      "version": version,
+                      "dname": "TorrServer DSM",
+                      "desc": "TorrServer, torrent to http (Uncensored build)",
+                      "link": f"{base}/releases/download/{tag}/{spk.name}",
+                      "size": len(blob),
+                      "md5": hashlib.md5(blob).hexdigest(),
+                      "arch": platform,
+                      "qinst": True,
+                      "qstart": True,
+                      "qupgrade": True,
+                      "beta": False,
+                      "start": True,
+                      "thirdparty": True,
+                      "silent_install": True,
+                      "silent_uninstall": True,
+                      "silent_upgrade": True,
+                      "maintainer": "TorrServer",
+                      "maintainer_url": "https://github.com/YouROK/TorrServer",
+                      "distributor": "Alex-Goodwin1",
+                      "distributor_url": base,
+                      "support_url": base,
+                      "category": 0,
+                      "subcategory": 0,
+                      "type": 0,
+                      "changelog": "",
+                      "thumbnail": [
+                          f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-72.png",
+                          f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-256.png",
+                      ],
+                      "snapshot": [],
+                  }
+              )
+              print(f"packages.json <- {spk.name} ({len(blob)} bytes, md5 {hashlib.md5(blob).hexdigest()})")
+
+          pathlib.Path("packages.json").write_text(
+              json.dumps({"packages": packages}, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages.json
-          git commit -m "Update packages.json to ${VERSION} [skip ci]" || echo "No changes to commit"
-          git push
+
+          if git diff --quiet -- packages.json; then
+            echo "packages.json already describes the built SPKs"
+          else
+            git add packages.json
+            git commit -m "Update packages.json to ${VERSION} [skip ci]"
+            git push
+          fi
 
       - name: Publish GitHub Release
         env:
