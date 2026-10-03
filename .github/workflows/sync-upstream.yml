@@ -25,13 +25,13 @@ jobs:
 
       - name: Add upstream remote and fetch
         run: |
-          git remote add upstream https://github.com/vladlenas/TorrServer-DSM.git
+          git remote add upstream https://github.com/vladlenas/TorrServer-DSM.git || true
           git fetch upstream
 
       - name: Merge upstream changes
         run: |
-          git merge upstream/main --no-edit || {
-            echo "::warning::Merge conflict detected. Please resolve manually."
+          git merge upstream/main --allow-unrelated-histories --no-edit || {
+            echo "::warning::Merge conflict detected. Please resolve manually in the GitHub UI."
             exit 0
           }
 
