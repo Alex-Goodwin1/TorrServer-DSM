@@ -8,6 +8,7 @@ PKG_SIZE="${3:?Package size is required}"
 
 TIMESTAMP="$(date -u +%Y%m%d-%H:%M:%S)"
 
+# Modified to support DSM 7.0 and newer.
 OS_MIN_VER="7.0-41890"
 
 case "${ARCH}" in
