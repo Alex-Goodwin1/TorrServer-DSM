@@ -4,3 +4,5 @@ build/
 android_out/
 torrserver_src/
 torrserv_android/
+__pycache__/
+*.pyc
