@@ -99,12 +99,6 @@ jobs:
           fi
 
       - name: Build TorrServer binaries
-        # The runner image and actions/setup-go export GOTOOLCHAIN=local, which
-        # makes the pinned Go abort when a go.mod asks for a newer release
-        # (upstream currently asks for >= 1.25.7). GOTOOLCHAIN=auto lets the
-        # installed Go download the required toolchain instead of failing the
-        # build, while local-or-newer keeps the pinned version whenever it is
-        # still sufficient.
         env:
           GOTOOLCHAIN: auto
         run: |

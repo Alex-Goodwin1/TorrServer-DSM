@@ -99,8 +99,6 @@ jobs:
 
           # A push made with the default GITHUB_TOKEN never triggers other
           # workflows, so the build has to be started explicitly.
-          # -R pins the dispatch to this fork: gh resolves the repository from
-          # the first remote in the order upstream > github > origin.
           gh workflow run build.yml --ref main -R "${GITHUB_REPOSITORY}"
           
           echo "Changes committed and pushed"
