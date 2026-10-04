@@ -102,5 +102,12 @@ jobs:
 
           # A push made with the default GITHUB_TOKEN never triggers other
           # workflows, so the build has to be started explicitly.
-          gh workflow run build.yml --ref main
+          #
+          # -R pins the dispatch to this fork. gh resolves the repository from
+          # the first remote in the order upstream > github > origin, and the
+          # step above adds an "upstream" remote pointing at
+          # vladlenas/TorrServer-DSM, so without -R the dispatch targets the
+          # parent repository and fails with
+          # "HTTP 403: Resource not accessible by integration".
+          gh workflow run build.yml --ref main -R "${GITHUB_REPOSITORY}"
           echo "Build workflow dispatched"
