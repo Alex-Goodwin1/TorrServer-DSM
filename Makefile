@@ -1,8 +1,8 @@
 TORRSERVER_VERSION := MatriX.145.1
 
-PKG_VERSION := 2.145.1-71
+PKG_VERSION := 2.145.1-72
 
-ARCHES := amd64 arm64 arm7
+ARCHES := amd64
 
 .PHONY: all clean
 

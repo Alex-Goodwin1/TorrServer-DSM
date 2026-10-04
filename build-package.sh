@@ -31,12 +31,6 @@ download_ffprobe() {
         amd64)
             ffprobe_url="https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffprobe-6.1-linux-64.zip"
             ;;
-        arm64)
-            ffprobe_url="https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffprobe-6.1-linux-arm-64.zip"
-            ;;
-        arm7)
-            ffprobe_url="https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffprobe-6.1-linux-armhf-32.zip"
-            ;;
         *)
             echo "ERROR: Unsupported architecture for ffprobe: ${ARCH}" >&2
             exit 1

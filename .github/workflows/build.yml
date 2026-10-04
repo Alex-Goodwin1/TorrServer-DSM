@@ -125,12 +125,6 @@ jobs:
           echo "Building linux/amd64..."
           build_target linux amd64 "" "$DEST_DIR/TorrServer-linux-amd64"
           
-          echo "Building linux/arm64..."
-          build_target linux arm64 "" "$DEST_DIR/TorrServer-linux-arm64"
-          
-          echo "Building linux/arm (GOARM=7)..."
-          build_target linux arm 7 "$DEST_DIR/TorrServer-linux-arm7"
-          
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
 
@@ -267,17 +261,33 @@ jobs:
           import json
           import os
           import pathlib
+          import re
+          import shutil
+          import subprocess
 
           version = os.environ["VERSION"]
           repo = os.environ["GITHUB_REPOSITORY"]
           base = f"https://github.com/{repo}"
           tag = f"v{version}"
 
-          platforms_by_arch = {
-              "amd64": "x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000 v1000nk r1000nk geminilakenk icelaked epyc7003",
-              "arm64": "aarch64 armv8 rtd1296 rtd1619b armada37xx",
-              "arm7": "armv7 alpine alpine4k armada370 armada375 armada38x armadaxp monaco",
-          }
+          def spk_platforms(arch):
+              info = subprocess.run(
+                  ["bash", "src/INFO.sh", version, arch, "1"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+              match = re.search(r'^arch="(.*)"$', info, re.MULTILINE)
+              if not match:
+                  raise SystemExit(f"::error::No arch= line in src/INFO.sh for {arch}")
+              return match.group(1)
+
+          platforms_by_arch = {arch: spk_platforms(arch) for arch in ("amd64",)}
+
+          thumbnails = [
+              f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-72.png",
+              f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-256.png",
+          ]
 
           packages = []
           entries = {}
@@ -301,7 +311,7 @@ jobs:
                   "qstart": True,
                   "qupgrade": True,
                   "beta": False,
-                  "startable": True,
+                  "startable": "yes",
                   "thirdparty": True,
                   "silent_install": True,
                   "silent_uninstall": True,
@@ -315,10 +325,8 @@ jobs:
                   "subcategory": 0,
                   "type": 0,
                   "changelog": "",
-                  "thumbnail": [
-                          f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-72.png",
-                          f"https://raw.githubusercontent.com/{repo}/main/src/ui/images/torrserver-256.png",
-                  ],
+                  "thumbnail": thumbnails,
+                  "thumbnail_retina": thumbnails,
                   "snapshot": [],
               }
               packages.append(entry)
@@ -336,6 +344,11 @@ jobs:
                   json.dumps({"packages": [entry]}, indent=2) + "\n", encoding="utf-8"
               )
               print(f"catalog/{arch}/packages.json <- {entry['link'].rsplit('/', 1)[-1]}")
+
+          for stale in pathlib.Path("catalog").glob("*"):
+              if stale.is_dir() and stale.name not in entries:
+                  shutil.rmtree(stale)
+                  print(f"catalog/{stale.name} <- removed (architecture no longer built)")
           PY
           
           git config user.name "github-actions[bot]"

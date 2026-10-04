@@ -19,20 +19,12 @@ OS_MIN_VER="7.0-41890"
 case "${ARCH}" in
 
     amd64)
-        PLATFORMS="x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000 v1000nk r1000nk geminilakenk icelaked epyc7003"
-        ;;
-
-    arm64)
-        PLATFORMS="aarch64 armv8 rtd1296 rtd1619b armada37xx"
-        ;;
-
-    arm7)
-        PLATFORMS="armv7 alpine alpine4k armada370 armada375 armada38x armadaxp monaco"
+        PLATFORMS="x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow cedarview denverton dockerx64 epyc7002 epyc7003 epyc7003ntb geminilake geminilakenk grantley icelaked kvmx64 purley r1000 r1000nk v1000 v1000nk"
         ;;
 
     *)
         echo "ERROR: Unsupported architecture: ${ARCH}" >&2
-        echo "Supported architectures: amd64, arm64, arm7" >&2
+        echo "Supported architectures: amd64" >&2
         exit 1
         ;;
 
