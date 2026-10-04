@@ -94,11 +94,14 @@ jobs:
         env:
           GOTOOLCHAIN: auto
         run: |
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          echo "TorrServer source version: ${TS_VERSION}"
+
           mkdir -p dest_bin
           DEST_DIR=$(pwd)/dest_bin
           
           cd torrserver_src/server
-          LDFLAGS="-s -w -checklinkname=0"
+          LDFLAGS="-s -w -checklinkname=0 -X server/version.Version=${TS_VERSION}"
 
           build_target() {
             local goos="$1" goarch="$2" goarm="$3" output="$4"
@@ -124,6 +127,37 @@ jobs:
           
           echo "Building linux/amd64..."
           build_target linux amd64 "" "$DEST_DIR/TorrServer-linux-amd64"
+
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ ! -d "${NDK_ROOT}" ]; then
+            NDK_ROOT=$(ls -d "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"/ndk/* 2>/dev/null | sort -V | tail -1 || true)
+          fi
+
+          if [ -z "${NDK_ROOT}" ] || [ ! -d "${NDK_ROOT}" ]; then
+            echo "::error::Android NDK not found - TorrServer-android-* cannot be built"
+            exit 1
+          fi
+
+          NDK_TOOLCHAIN="${NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "Using Android NDK: ${NDK_ROOT}"
+
+          build_android() {
+            local cc="$1" goarch="$2" goarm="$3" output="$4"
+            local arm_env=""
+
+            if [ -n "${goarm}" ]; then
+              arm_env="GOARM=${goarm}"
+            fi
+
+            echo "Building android/${goarch}..."
+            env CC="${NDK_TOOLCHAIN}/bin/${cc}" CGO_ENABLED=1 GOOS=android GOARCH="${goarch}" ${arm_env} \
+              go build -ldflags="${LDFLAGS}" -tags=nosqlite -trimpath -o "${output}" ./cmd
+          }
+
+          build_android aarch64-linux-android21-clang arm64 "" "$DEST_DIR/TorrServer-android-arm64"
+          build_android armv7a-linux-androideabi21-clang arm 7 "$DEST_DIR/TorrServer-android-arm7"
+          build_android x86_64-linux-android21-clang amd64 "" "$DEST_DIR/TorrServer-android-amd64"
+          build_android i686-linux-android21-clang 386 "" "$DEST_DIR/TorrServer-android-386"
           
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
@@ -135,26 +169,100 @@ jobs:
             exit 1
           fi
 
+          for bin in "$DEST_DIR"/TorrServer-android-*; do
+            if [ ! -s "${bin}" ]; then
+              echo "::error::${bin} is empty"
+              exit 1
+            fi
+
+            file "${bin}"
+
+            if ! file "${bin}" | grep -qi 'ELF'; then
+              echo "::error::${bin} is not an ELF binary"
+              exit 1
+            fi
+
+            if ! file "${bin}" | grep -q 'linker'; then
+              echo "::warning::${bin} is not linked against the Android dynamic loader"
+            fi
+          done
+
       - name: Clone and patch TorrServe Android client
+        env:
+          UPDATE_HOST: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/torr
         run: |
           git clone https://github.com/YouROK/TorrServe.git torrserv_android
           cd torrserv_android
           
           REPO_URL="${{ github.repository }}"
-          
+          UPDATE_HOST=$(printf '%s' "${UPDATE_HOST}" | tr '[:upper:]' '[:lower:]')
+
           find app/src -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i "s|YouROK/TorrServer|$REPO_URL|g" {} +
           
-          echo "Patched Android client to use: $REPO_URL"
+          CONSTS="app/src/main/java/ru/yourok/torrserve/app/Consts.kt"
+          sed -i "s|https://releases.yourok.ru/torr|${UPDATE_HOST}|g" "$CONSTS"
 
-      - name: Build Android APK
+          grep -n 'REL_HOST\|UPDATE_SERVER_PATH\|UPDATE_APK_PATH\|AD_LINK' "$CONSTS"
+
+          if grep -q 'releases.yourok.ru' "$CONSTS"; then
+            echo "::error::Consts.kt still points at the upstream update host - the client would download the censored server"
+            exit 1
+          fi
+
+          if ! grep -q "${UPDATE_HOST}" "$CONSTS"; then
+            echo "::error::Consts.kt was not patched - the update endpoints format changed upstream"
+            exit 1
+          fi
+          
+          echo "Patched Android client to use: $REPO_URL"
+          echo "Android client update host: ${UPDATE_HOST}"
+
+      - name: Build, sign and package the Android client
         run: |
           cd torrserv_android
           chmod +x gradlew
           ./gradlew assembleRelease || echo "::warning::Android APK build failed - releasing the SPK only"
           
           mkdir -p ../android_out
-          cp app/build/outputs/apk/release/app-release-unsigned.apk ../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk 2>/dev/null || \
-          cp app/build/outputs/apk/release/*.apk ../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk 2>/dev/null || true
+
+          UNSIGNED=$(ls -1 app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)
+          if [ -z "${UNSIGNED}" ]; then
+            echo "::warning::Gradle produced no APK - the Android client is not published"
+            exit 0
+          fi
+
+          KEYSTORE="../keystore/torrserve-release.jks"
+          if [ ! -f "${KEYSTORE}" ]; then
+            echo "::error::${KEYSTORE#../} is missing - the Android client cannot be signed"
+            exit 1
+          fi
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS=$(dirname "$(ls -1 "${SDK}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)")
+
+          if [ ! -x "${BUILD_TOOLS}/apksigner" ]; then
+            echo "::error::apksigner was not found below ${SDK}/build-tools"
+            exit 1
+          fi
+
+          APK="../android_out/TorrServe-Android-${{ needs.check-version.outputs.version }}.apk"
+
+          cp "${UNSIGNED}" ../android_out/unsigned.apk
+          "${BUILD_TOOLS}/zipalign" -p -f 4 ../android_out/unsigned.apk ../android_out/aligned.apk
+          "${BUILD_TOOLS}/apksigner" sign \
+            --ks "${KEYSTORE}" \
+            --ks-key-alias torrserver \
+            --ks-pass pass:torrserver \
+            --key-pass pass:torrserver \
+            --out "${APK}" \
+            ../android_out/aligned.apk
+          rm -f ../android_out/unsigned.apk ../android_out/aligned.apk
+
+          "${BUILD_TOOLS}/apksigner" verify --print-certs "${APK}"
+
+          CODE=$(grep -E '^[[:space:]]*versionCode[[:space:]]+[0-9]+' app/build.gradle | head -1 | grep -oE '[0-9]+' || true)
+          NAME=$(grep -E '^[[:space:]]*versionName[[:space:]]+"' app/build.gradle | head -1 | sed -E 's/.*"([^"]*)".*/\1/' || true)
+          printf '{"version": "%s", "versionInt": %s}\n' "${NAME:-unknown}" "${CODE:-0}" > ../android_out/client_version.json
           
           ls -lh ../android_out/
 
@@ -214,6 +322,8 @@ jobs:
         run: |
           echo "Built SPK packages:"
           find spk -maxdepth 1 -type f -name '*.spk' -print
+          echo "Built binary tree:"
+          ls -lh dest_bin/ || true
           echo "Built Android APK:"
           ls -lh android_out/ || true
 
@@ -223,7 +333,9 @@ jobs:
           name: TorrServer-Build-${{ needs.check-version.outputs.version }}
           path: |
             spk/*.spk
+            dest_bin/TorrServer-*
             android_out/*.apk
+            android_out/client_version.json
           if-no-files-found: error
 
   release:
@@ -251,6 +363,57 @@ jobs:
           echo "Release version: ${{ needs.check-version.outputs.version }}"
           echo "Files:"
           ls -lh artifacts/
+
+      - name: Generate the TorrServer manifests served to the Android client
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          export TS_VERSION
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          version = os.environ["VERSION"]
+          ts_version = os.environ["TS_VERSION"]
+          base = f"https://github.com/{repo}"
+          tag = f"v{version}"
+
+          def asset(name):
+              return f"{base}/releases/download/{tag}/{name}"
+
+          links = {
+              f"android-{arch}": asset(f"TorrServer-android-{arch}")
+              for arch in ("arm64", "arm7", "amd64", "386")
+          }
+          links["linux-amd64"] = asset("TorrServer-linux-amd64")
+
+          manifests = pathlib.Path("torr")
+          manifests.mkdir(parents=True, exist_ok=True)
+
+          server_manifest = manifests / "server_release.json"
+          server_manifest.write_text(
+              json.dumps({"version": ts_version, "links": links}, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(f"torr/server_release.json <- version {ts_version}, {len(links)} links")
+
+          client_info = pathlib.Path("artifacts/android_out/client_version.json")
+          entries = []
+          if client_info.exists():
+              info = json.loads(client_info.read_text(encoding="utf-8"))
+              entries.append({
+                  "version": info.get("version", "unknown"),
+                  "versionInt": int(info.get("versionInt", 0)),
+                  "desc": f"TorrServe {info.get('version', 'unknown')} - uncensored client build",
+                  "link": asset(f"TorrServe-Android-{version}.apk"),
+              })
+          apk_manifest = manifests / "apk_release.json"
+          apk_manifest.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+          print(f"torr/apk_release.json <- {len(entries)} entr(ies)")
+          PY
 
       - name: Generate packages.json for the DSM package source
         env:
@@ -354,12 +517,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add packages.json catalog
+          git add packages.json catalog torr
 
           if git diff --cached --quiet; then
-            echo "packages.json and catalog/ already describe the built SPKs"
+            echo "packages.json, catalog/ and torr/ already describe the built artifacts"
           else
-            git commit -m "Update package source to ${VERSION} [skip ci]"
+            git commit -m "Update package source and android manifests to ${VERSION} [skip ci]"
             git push
           fi
 
@@ -368,7 +531,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          RELEASE_FILES="$(ls -1 artifacts/spk/*.spk artifacts/android_out/*.apk 2>/dev/null || true)"
+          RELEASE_FILES="$(ls -1 artifacts/spk/*.spk artifacts/dest_bin/TorrServer-* artifacts/android_out/*.apk 2>/dev/null || true)"
 
           if [ -z "${RELEASE_FILES}" ]; then
             echo "::error::No release files were produced"
