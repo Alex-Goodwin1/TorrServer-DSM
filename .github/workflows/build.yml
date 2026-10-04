@@ -273,11 +273,15 @@ jobs:
           base = f"https://github.com/{repo}"
           tag = f"v{version}"
 
-          platform_by_arch = {"amd64": "x86_64", "arm64": "aarch64", "arm7": "armv7"}
+          platforms_by_arch = {
+              "amd64": "x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton epyc7002 geminilake grantley kvmx64 purley r1000 v1000 v1000nk r1000nk geminilakenk icelaked epyc7003",
+              "arm64": "aarch64 armv8 rtd1296 rtd1619b armada37xx",
+              "arm7": "armv7 alpine alpine4k armada370 armada375 armada38x armadaxp monaco",
+          }
 
           packages = []
           entries = {}
-          for arch, platform in platform_by_arch.items():
+          for arch, platforms in platforms_by_arch.items():
               spks = sorted(pathlib.Path("artifacts/spk").glob(f"*-{arch}.spk"))
               if not spks:
                   raise SystemExit(f"::error::No SPK for {arch} found in artifacts/spk")
@@ -292,12 +296,12 @@ jobs:
                   "link": f"{base}/releases/download/{tag}/{spk.name}",
                   "size": len(blob),
                   "md5": hashlib.md5(blob).hexdigest(),
-                  "arch": platform,
+                  "arch": platforms,
                   "qinst": True,
                   "qstart": True,
                   "qupgrade": True,
                   "beta": False,
-                  "start": True,
+                  "startable": True,
                   "thirdparty": True,
                   "silent_install": True,
                   "silent_uninstall": True,

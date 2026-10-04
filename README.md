@@ -50,6 +50,22 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 
 Теперь при появлении новой версии в разделе "Обновления" Центра пакетов появится кнопка **Обновить**.
 
+## Если обновления не видны в Центре пакетов
+
+1. **Сравнение версий.** Центр пакетов показывает кнопку **Обновить** только когда версия каталога старше установленной. Проверка по SSH:
+
+   ```bash
+   grep -E '^(version|arch)=' /var/packages/TorrServer/INFO
+   ```
+
+   Если установлена самая свежая версия из `packages.json` — кнопки обновления не будет, это нормально. Новая версия появляется после изменения `PKG_VERSION` в `Makefile`.
+2. **Адрес источника должен указывать на файл каталога.** Корневой адрес без `/packages.json` отдаёт HTML-страницу, а не JSON, и DSM такой источник не разбирает:
+   - все архитектуры: `https://alex-goodwin1.github.io/TorrServer-DSM/packages.json`;
+   - только нужная архитектура: `.../catalog/amd64/packages.json`, `.../catalog/arm64/packages.json`, `.../catalog/arm7/packages.json`.
+3. **Обновить источник.** DSM кэширует каталоги: если адрес менялся, удалите запись в **Центр пакетов → Настройки → Источники пакетов** и добавьте заново.
+4. **Кэш GitHub Pages.** Сайт отдаёт файлы с `max-age=600`, поэтому новый каталог виден с задержкой до 10 минут.
+
+
 ## Credits
 
 - Core TorrServer: [YouROK](https://github.com/YouROK/TorrServer)
