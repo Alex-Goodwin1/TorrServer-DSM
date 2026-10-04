@@ -35,9 +35,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Files owned by this fork. Overwriting them from upstream would
-          # revert the numeric SPK version scheme, the DSM 7.0+ compatibility
-          # layer and this CI, so they are always kept as they are.
           FORK_OWNED=(
             ".github"
             ".gitignore"
@@ -76,8 +73,6 @@ jobs:
             exit 0
           fi
 
-          # Upstream package content changed, so bump the package revision to
-          # make Package Center offer the freshly built SPK as an update.
           TS_VERSION=$(sed -n 's/^TORRSERVER_VERSION[[:space:]]*:=[[:space:]]*//p' Makefile | head -1 | xargs)
           BASE_VERSION=$(printf '%s' "${TS_VERSION}" | sed 's/MatriX\.//')
 
@@ -100,7 +95,5 @@ jobs:
 
           echo "Synced upstream files, new package version: ${NEW_PKG_VERSION}"
 
-          # A push made with the default GITHUB_TOKEN never triggers other
-          # workflows, so the build has to be started explicitly.
           gh workflow run build.yml --ref main -R "${GITHUB_REPOSITORY}"
           echo "Build workflow dispatched"

@@ -15,23 +15,6 @@ CONFIG_DIR="/var/packages/${SYNOPKG_PKGNAME}/var"
 TORRSERVER_LOG="${CONFIG_DIR}/TorrServer.log"
 CERTIFICATE_HELPER="/var/packages/${SYNOPKG_PKGNAME}/scripts/certificate-helper"
 
-# ---------------------------------------------------------------------------
-# DSM 7.0 and newer compatibility helpers
-#
-# DSM ships different helpers depending on the release:
-#   * the Python 3 interpreter sits elsewhere on every release
-#     (/bin/python3, /usr/bin/python3, /usr/local/bin/python3),
-#   * third-party repositories install it somewhere else again: the
-#     SynoCommunity packages python311/python312/python313 publish the
-#     interpreter through SPK_USR_LOCAL_LINKS in /usr/local/bin/python3.<minor>
-#     and keep the real binary in /var/packages/<pkg>/target/bin, while Entware
-#     (opkg) installs it in /opt/bin,
-#   * synopkghelper / synosystemctl / sudo are not guaranteed to live in the
-#     same directory on every DSM 7 release.
-# Resolve every tool at runtime instead of hardcoding paths that only exist on
-# the newest DSM builds, so a missing tool degrades gracefully instead of
-# breaking the package installation.
-# ---------------------------------------------------------------------------
 find_binary()
 {
     for _candidate in "$@"; do
@@ -45,10 +28,6 @@ find_binary()
 
 find_python()
 {
-    # helper.py imports http.server and ssl while it loads, so an interpreter
-    # without those modules (for example Entware's minimal python3-light) can
-    # never serve the UI. Such candidates are skipped here instead of being
-    # started and left to crash on the first request.
     for _candidate in /bin/python3 /usr/bin/python3 /usr/local/bin/python3 \
                       /bin/python3.* /usr/bin/python3.* /usr/local/bin/python3.* \
                       /var/packages/Python*/target/bin/python3* \
@@ -154,10 +133,6 @@ if [ "${AUTH_ENABLED}" = "1" ]; then
     TORRSERVER_ARGS="-a ${TORRSERVER_ARGS}"
 fi
 
-# The helper serves the DSM UI on port 8095 and must keep running, so it is
-# started as the first background command (start-stop-status starts every line
-# of SERVICE_COMMAND separately). Without a Python 3 interpreter the server
-# still runs, only the DSM UI page is unavailable.
 if [ -n "${PYTHON_BIN}" ]; then
     SERVICE_COMMAND="${PYTHON_BIN} ${SYNOPKG_PKGDEST}/helper/helper.py
 ${SYNOPKG_PKGDEST}/bin/TorrServer ${TORRSERVER_ARGS}"
@@ -186,9 +161,6 @@ service_preupgrade()
 
 service_postupgrade()
 {
-    # nginx has to pick up the helper proxy configuration. The command name
-    # differs between DSM releases, and a failure here must never abort the
-    # package upgrade.
     if [ -n "${SYNOPKGCTL_BIN}" ]; then
         "${SYNOPKGCTL_BIN}" reload nginx.service >/dev/null 2>&1 ||
             "${SYNOPKGCTL_BIN}" reload nginx >/dev/null 2>&1 || true

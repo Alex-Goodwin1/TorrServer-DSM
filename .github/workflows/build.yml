@@ -9,12 +9,7 @@ on:
 permissions:
   contents: write
 
-# The runner image is pinned instead of using ubuntu-latest: the Android SDK,
-# Java 21, tar/xz/make and Go toolchain combination used here is the one the
-# packages were validated with, and GitHub announced that the ubuntu-latest
-# label will migrate to Ubuntu 26.04.
 
-# Serialise builds so two runs can never publish the same version twice.
 concurrency:
   group: torrserver-build
   cancel-in-progress: false
@@ -90,9 +85,6 @@ jobs:
           
           grep -A 1 "var defaultBlockedReferers" server/web/waf/referer.go
 
-          # sed exits with status 0 even when its pattern does not match, so a
-          # renamed or reshaped block upstream would silently ship the censored
-          # binary. Fail the build instead of publishing it.
           if ! grep -q 'var defaultBlockedReferers = \[\]string{}' server/web/waf/referer.go; then
             echo "::error::referer.go was not patched - defaultBlockedReferers format changed upstream"
             exit 1
@@ -108,10 +100,6 @@ jobs:
           cd torrserver_src/server
           LDFLAGS="-s -w -checklinkname=0"
 
-          # Newer TorrServer releases require a recent Go toolchain (go.mod of
-          # YouROK/TorrServer asks for Go 1.25.x). GOTOOLCHAIN=auto makes the
-          # installed Go download it automatically, and if a future linker
-          # dropped -checklinkname the build is retried without it.
           build_target() {
             local goos="$1" goarch="$2" goarm="$3" output="$4"
 
@@ -140,19 +128,12 @@ jobs:
           echo "Building linux/arm64..."
           build_target linux arm64 "" "$DEST_DIR/TorrServer-linux-arm64"
           
-          # 32 bit ARM is GOARCH=arm together with GOARM=7: "arm7" is not a
-          # GOARCH value and makes the toolchain die with
-          # "go: unsupported GOOS/GOARCH pair linux/arm7". The output file keeps
-          # the arm7 name because that is the arch name build-package.sh and
-          # src/INFO.sh use for the DSM platform list.
           echo "Building linux/arm (GOARM=7)..."
           build_target linux arm 7 "$DEST_DIR/TorrServer-linux-arm7"
           
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
 
-          # Smoke test: a broken (e.g. unpatched linkname) binary must never
-          # reach a release, so the amd64 build has to start and answer.
           OUTPUT=$("$DEST_DIR/TorrServer-linux-amd64" --version 2>&1) && STATUS=0 || STATUS=$?
           echo "TorrServer --version exited with ${STATUS}: ${OUTPUT}"
           if [ -z "${OUTPUT}" ]; then
@@ -190,10 +171,6 @@ jobs:
 
       - name: Build SPK packages
         run: |
-          # GitHub's web uploader stores new files as 100644 while
-          # build-package.sh runs src/INFO.sh directly and ships src/scripts
-          # as-is, so the executable bits are restored here rather than relying
-          # on the git mode surviving an upload through the browser.
           chmod +x build-package.sh src/INFO.sh src/scripts/* src/WIZARD_UIFILES/* 2>/dev/null || true
           make
 
@@ -216,9 +193,6 @@ jobs:
               exit 1
             fi
 
-            # A script without the executable bit cannot be run by DSM, and the
-            # web uploader quietly stores new files as 644, so check the modes
-            # that actually ended up inside the package instead of trusting git.
             outer=$(tar -tvf "${spk}" | awk '{print $1" "$NF}')
             for member in scripts/setup-permissions scripts/start-stop-status WIZARD_UIFILES/uninstall_uifile; do
               case "${outer}" in
@@ -288,13 +262,6 @@ jobs:
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          # A DSM package source is not a free-form list: every entry has to
-          # point at a real .spk ("link") and carry that file's exact "size" and
-          # "md5", otherwise Package Center can neither download nor verify the
-          # package. The key names below follow Synology's own repository format
-          # (as documented by the reverse engineered "sspks" implementation).
-          # The file is written while the freshly built SPKs are still local, so
-          # it can never advertise a download that does not exist.
           python3 - <<'PY'
           import hashlib
           import json
@@ -306,9 +273,6 @@ jobs:
           base = f"https://github.com/{repo}"
           tag = f"v{version}"
 
-          # build-package.sh writes TorrServer-DSM-<torrserver version>-<arch>.spk
-          # for every arch of the Makefile; the platform names Package Center
-          # knows are a different spelling of those same three builds.
           platform_by_arch = {"amd64": "x86_64", "arm64": "aarch64", "arm7": "armv7"}
 
           packages = []
@@ -361,12 +325,6 @@ jobs:
               json.dumps({"packages": packages}, indent=2) + "\n", encoding="utf-8"
           )
 
-          # Package Center filters packages by architecture only when the
-          # repository server does it (Synology's own catalog is queried with
-          # arch/unique/build parameters). A file on GitHub Pages is served as
-          # is, so the same release is published per architecture as well: one
-          # entry each, which removes any ambiguity about which .spk belongs to
-          # the NAS and lets Package Center show exactly one TorrServer.
           for arch, entry in entries.items():
               catalog = pathlib.Path("catalog") / arch / "packages.json"
               catalog.parent.mkdir(parents=True, exist_ok=True)
@@ -379,8 +337,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # packages.json is already tracked while catalog/ may contain brand new
-          # files, so stage both and compare the index instead of the work tree.
           git add packages.json catalog
 
           if git diff --cached --quiet; then
