@@ -2,12 +2,12 @@
   "packages": [
     {
       "package": "TorrServer",
-      "version": "2.145.1-70",
+      "version": "2.145.1-71",
       "dname": "TorrServer DSM",
       "desc": "TorrServer, torrent to http (Uncensored build)",
-      "link": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.1-70/TorrServer-DSM-MatriX.145.1-arm64.spk",
+      "link": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.1-71/TorrServer-DSM-MatriX.145.1-arm64.spk",
       "size": 35358720,
-      "md5": "05df8112a4e2d3865e1bff51c6ba15a8",
+      "md5": "c787a466a989b75fc3164c521e9ae42d",
       "arch": "aarch64",
       "qinst": true,
       "qstart": true,
