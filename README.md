@@ -36,8 +36,6 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
   
 - Supported architectures:
   - `amd64`
-  - `arm64`
-  - `arm7`
 
 ## Как настроить автоматические обновления на Synology
 
