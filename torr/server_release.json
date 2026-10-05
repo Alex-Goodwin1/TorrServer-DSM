@@ -1,10 +1,10 @@
 {
   "version": "MatriX.145.2",
   "links": {
-    "android-arm64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-74/TorrServer-android-arm64",
-    "android-arm7": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-74/TorrServer-android-arm7",
-    "android-amd64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-74/TorrServer-android-amd64",
-    "android-386": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-74/TorrServer-android-386",
-    "linux-amd64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-74/TorrServer-linux-amd64"
+    "android-arm64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-75/TorrServer-android-arm64",
+    "android-arm7": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-75/TorrServer-android-arm7",
+    "android-amd64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-75/TorrServer-android-amd64",
+    "android-386": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-75/TorrServer-android-386",
+    "linux-amd64": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.145.2-75/TorrServer-linux-amd64"
   }
 }
