@@ -5,13 +5,14 @@ SUDOERS_FILE="${SUDOERS_DIR}/TorrServer"
 TMP_FILE="${SUDOERS_FILE}.tmp"
 RESTART_SCRIPT="/var/packages/TorrServer/scripts/restart-package"
 CERTIFICATE_HELPER="/var/packages/TorrServer/scripts/certificate-helper"
+PREPARE_DIRECTORY="/var/packages/TorrServer/scripts/prepare-directory"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "This script must be run as root."
     exit 1
 fi
 
-if [ ! -x "${RESTART_SCRIPT}" ] || [ ! -x "${CERTIFICATE_HELPER}" ]; then
+if [ ! -x "${RESTART_SCRIPT}" ] || [ ! -x "${CERTIFICATE_HELPER}" ] || [ ! -x "${PREPARE_DIRECTORY}" ]; then
     echo "TorrServer package scripts are not available."
     exit 1
 fi
@@ -20,7 +21,7 @@ fi
 
 /bin/rm -f "${TMP_FILE}"
 
-/bin/sh -c "printf '%s\\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}' > '${TMP_FILE}'" || exit 1
+/bin/sh -c "printf '%s\\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}, ${PREPARE_DIRECTORY}' > '${TMP_FILE}'" || exit 1
 
 /bin/chmod 0440 "${TMP_FILE}" || exit 1
 /bin/chown root:root "${TMP_FILE}" 2>/dev/null || true

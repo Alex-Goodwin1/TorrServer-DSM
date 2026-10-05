@@ -85,5 +85,18 @@
   "Restart is unavailable until DSM permissions are configured.": "Ponowne uruchomienie jest niedostępne, dopóki uprawnienia DSM nie zostaną skonfigurowane.",
   "Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "Rozszerzone uprawnienia DSM nie są skonfigurowane. TorrServer działa, ale synchronizacja certyfikatów i ponowne uruchamianie z Ustawień jest niedostępne.",
   "TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.": "TorrServer działa bez dodatkowych uprawnień. Dostęp root jest wymagany tylko do automatycznej synchronizacji certyfikatów i ponownego uruchamiania TorrServer z Ustawień.",
-  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer działa, ale synchronizacja certyfikatów i ponowne uruchamianie z Ustawień są niedostępne."
+  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer działa, ale synchronizacja certyfikatów i ponowne uruchamianie z Ustawień są niedostępne.",
+  "FUSE directory": "Katalog FUSE",
+  "Enable FUSE filesystem": "Włącz system plików FUSE",
+  "Select FUSE directory": "Wybierz katalog FUSE",
+  "Media Server Recommendations": "Zalecenia dla serwerów multimedialnych",
+  "Open recommendations": "Otwórz zalecenia",
+  "Plex": "Plex",
+  "Emby": "Emby",
+  "FUSE can be used as a media library source for Plex.": "FUSE można używać jako źródła biblioteki multimediów dla Plex.",
+  "Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load.": "Normalne skanowanie biblioteki może pozostać włączone. Analiza w tle i generowanie miniatur może odczytywać duże pliki wirtualne i powodować znaczne obciążenie procesora, sieci oraz pamięci masowej.",
+  "FUSE can be used as a media library source for Emby.": "FUSE można używać jako źródła biblioteki multimediów dla Emby.",
+  "Background task behavior with TorrServer FUSE has not been tested in this version.": "Działanie zadań w tle Emby z TorrServer FUSE nie było testowane w tej wersji.",
+  "Keep <b>Show only active torrents</b> disabled so Plex can see the library without starting torrents.": "Pozostaw opcję <b>„Pokazuj tylko aktywne torrenty”</b> wyłączoną, aby Plex widział bibliotekę bez uruchamiania torrentów.",
+  "To avoid unnecessary reads of large virtual files, disable <b>Perform extensive file analysis during maintenance</b> and disable <b>video preview thumbnails</b> in Plex.": "Aby uniknąć niepotrzebnego odczytu dużych plików wirtualnych, wyłącz w Plex <b>„Wykonuj rozszerzoną analizę plików podczas konserwacji”</b> oraz <b>miniatury podglądu wideo</b>."
 }

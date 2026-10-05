@@ -85,5 +85,18 @@
   "Restart is unavailable until DSM permissions are configured.": "Paleidimas iš naujo nepasiekiamas, kol nesukonfigūruotos DSM teisės.",
   "Extended DSM permissions are not configured. TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "Išplėstinės DSM teisės nesukonfigūruotos. TorrServer veikia, tačiau sertifikatų sinchronizavimas ir paleidimas iš naujo per Nustatymus nepasiekiami.",
   "TorrServer works without additional privileges. Root access is only required for automatic certificate synchronization and restarting TorrServer from the Helper.": "TorrServer veikia be papildomų teisių. Root prieiga reikalinga tik automatiniam sertifikatų sinchronizavimui ir TorrServer paleidimui iš naujo per Nustatymus.",
-  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer veikia, tačiau sertifikatų sinchronizavimas ir paleidimas iš naujo per Nustatymus nepasiekiami."
+  "TorrServer itself continues to work, but certificate synchronization and restart from Helper are unavailable.": "TorrServer veikia, tačiau sertifikatų sinchronizavimas ir paleidimas iš naujo per Nustatymus nepasiekiami.",
+  "FUSE directory": "FUSE katalogas",
+  "Enable FUSE filesystem": "Įjungti FUSE failų sistemą",
+  "Select FUSE directory": "Pasirinkti FUSE katalogą",
+  "Media Server Recommendations": "Rekomendacijos medijos serveriams",
+  "Open recommendations": "Atidaryti rekomendacijas",
+  "Plex": "Plex",
+  "Emby": "Emby",
+  "FUSE can be used as a media library source for Plex.": "FUSE galima naudoti kaip Plex medijos bibliotekos šaltinį.",
+  "Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load.": "Įprastą bibliotekos skenavimą galima palikti įjungtą. Fono analizė ir miniatiūrų kūrimas gali skaityti didelius virtualius failus ir sukelti didelę procesoriaus, tinklo bei saugyklos apkrovą.",
+  "FUSE can be used as a media library source for Emby.": "FUSE galima naudoti kaip Emby medijos bibliotekos šaltinį.",
+  "Background task behavior with TorrServer FUSE has not been tested in this version.": "Emby fono užduočių veikimas su TorrServer FUSE šioje versijoje nebuvo išbandytas.",
+  "Keep <b>Show only active torrents</b> disabled so Plex can see the library without starting torrents.": "Palikite <b>„Rodyti tik aktyvius torrentus“</b> išjungtą, kad Plex matytų biblioteką nepaleisdamas torrentų.",
+  "To avoid unnecessary reads of large virtual files, disable <b>Perform extensive file analysis during maintenance</b> and disable <b>video preview thumbnails</b> in Plex.": "Kad būtų išvengta nereikalingo didelių virtualių failų skaitymo, Plex išjunkite <b>„Atlikti išsamią failų analizę priežiūros metu“</b> ir <b>vaizdo įrašų peržiūros miniatiūras</b>."
 }

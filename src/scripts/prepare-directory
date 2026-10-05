@@ -1,0 +1,88 @@
+#!/bin/sh
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root."
+    exit 1
+fi
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: prepare-directory <TorrServer directory>"
+    exit 1
+fi
+
+TORRSERVER_DIR="$1"
+
+case "${TORRSERVER_DIR}" in
+    /volume[0-9]|/volume[0-9]/|/volume[0-9]/*)
+        ;;
+    *)
+        echo "Invalid TorrServer directory."
+        exit 1
+        ;;
+esac
+
+case "${TORRSERVER_DIR}" in
+    /volume[0-9]|/volume[0-9]/)
+        echo "Invalid TorrServer directory."
+        exit 1
+        ;;
+esac
+
+TORRSERVER_DIR="${TORRSERVER_DIR%/}"
+CACHE_DIR="${TORRSERVER_DIR}/Cache"
+FUSE_DIR="${TORRSERVER_DIR}/FUSE"
+
+if [ ! -e "${TORRSERVER_DIR}" ]; then
+    if ! /bin/mkdir -p "${TORRSERVER_DIR}"; then
+        echo "Failed to create TorrServer directory."
+        exit 1
+    fi
+fi
+
+if [ ! -d "${TORRSERVER_DIR}" ]; then
+    echo "TorrServer directory is not a directory."
+    exit 1
+fi
+
+prepare_subdir()
+{
+    SUBDIR="$1"
+
+    if [ -e "${SUBDIR}" ]; then
+        if [ ! -d "${SUBDIR}" ]; then
+            echo "TorrServer subdirectory is not a directory: ${SUBDIR}"
+            return 1
+        fi
+
+        OWNER="$(/bin/stat -c '%U:%G' "${SUBDIR}" 2>/dev/null)"
+
+        if [ "${OWNER}" != "TorrServer:TorrServer" ]; then
+            echo "TorrServer subdirectory has unexpected ownership: ${SUBDIR}"
+            return 1
+        fi
+
+        return 0
+    fi
+
+    if ! /bin/mkdir "${SUBDIR}"; then
+        echo "Failed to create TorrServer subdirectory: ${SUBDIR}"
+        return 1
+    fi
+
+    if ! /bin/chown TorrServer:TorrServer "${SUBDIR}"; then
+        echo "Failed to set directory ownership: ${SUBDIR}"
+        return 1
+    fi
+
+    if ! /bin/chmod 0755 "${SUBDIR}"; then
+        echo "Failed to set directory permissions: ${SUBDIR}"
+        return 1
+    fi
+
+    return 0
+}
+
+prepare_subdir "${CACHE_DIR}" || exit 1
+prepare_subdir "${FUSE_DIR}" || exit 1
+
+exit 0

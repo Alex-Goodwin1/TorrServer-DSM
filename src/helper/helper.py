@@ -36,7 +36,9 @@ LOG_BACKUP_COUNT = 2
 PORT_FILE = os.path.join(PACKAGE_VAR, "torrserver.port")
 AUTH_FILE = os.path.join(PACKAGE_VAR, "torrserver.auth")
 ACCS_FILE = os.path.join(PACKAGE_VAR, "accs.db")
+TORRSERVER_DIR_FILE = os.path.join(PACKAGE_VAR, "torrserver.dir")
 CACHE_PATH_FILE = os.path.join(PACKAGE_VAR, "cache.path")
+FUSE_FILE = os.path.join(PACKAGE_VAR, "torrserver.fuse")
 HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.https")
 HTTPS_PORT_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.port")
 FORCE_HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.force.https")
@@ -50,6 +52,7 @@ SSL_CERT_MODE_MANUAL = "manual"
 
 RESTART_SCRIPT = "/var/packages/TorrServer/scripts/restart-package"
 CERTIFICATE_HELPER = "/var/packages/TorrServer/scripts/certificate-helper"
+PREPARE_DIRECTORY = "/var/packages/TorrServer/scripts/prepare-directory"
 
 LOCALE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locales")
 LANGUAGE_FILE = os.path.join(PACKAGE_VAR, "helper.language")
@@ -373,6 +376,77 @@ def get_port():
     return port
 
 
+def get_running_ports():
+    result = {
+        "http": None,
+        "https": None,
+        "ssl": False,
+        "force_https": False,
+    }
+
+    try:
+        pid_result = subprocess.run(
+            ["pidof", "TorrServer"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+        )
+
+        pids = pid_result.stdout.strip().split()
+        if not pids:
+            return result
+
+        for pid in pids:
+            try:
+                with open("/proc/{}/cmdline".format(pid), "rb") as f:
+                    raw_args = f.read().split(b"\0")
+
+                args = [
+                    item.decode("utf-8", errors="replace")
+                    for item in raw_args
+                    if item
+                ]
+
+                if not args:
+                    continue
+
+                executable = args[0]
+                if not executable.endswith("/TorrServer"):
+                    continue
+
+                for index, arg in enumerate(args):
+                    if arg == "-p" and index + 1 < len(args):
+                        value = args[index + 1]
+                        if value.isdigit():
+                            port = int(value)
+                            if 1 <= port <= 65535:
+                                result["http"] = port
+
+                    elif arg == "--ssl":
+                        result["ssl"] = True
+
+                    elif arg == "--sslport" and index + 1 < len(args):
+                        value = args[index + 1]
+                        if value.isdigit():
+                            port = int(value)
+                            if 1 <= port <= 65535:
+                                result["https"] = port
+
+                    elif arg == "--force-https":
+                        result["force_https"] = True
+
+                return result
+
+            except (OSError, IOError):
+                continue
+
+    except Exception:
+        pass
+
+    return result
+
+
 def get_auth_enabled():
     return read_file(AUTH_FILE, "0") == "1" and os.path.isfile(ACCS_FILE)
 
@@ -543,6 +617,38 @@ def get_torrserver_uptime():
         return "Unknown"
 
 
+def prepare_torrserver_directory(torrserver_dir):
+    if not os.path.isfile(PREPARE_DIRECTORY):
+        return False, "Directory preparation script not found"
+
+    if not torrserver_dir:
+        return False, "TorrServer directory is required"
+
+    try:
+        result = subprocess.run(
+            [
+                "/bin/sudo",
+                "-n",
+                PREPARE_DIRECTORY,
+                torrserver_dir,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=15,
+        )
+
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip()
+            return False, message or "Failed to prepare TorrServer directory"
+
+        return True, ""
+
+    except Exception as e:
+        return False, str(e)
+
+
 def restart_package():
     """
     Start the package restart script through sudo.
@@ -600,7 +706,22 @@ def get_api_auth_header():
         return None
 
 
+def get_torrserver_dir():
+    return read_file(TORRSERVER_DIR_FILE, "")
+
+
+def get_cache_dir(torrserver_dir=None):
+    root = get_torrserver_dir() if torrserver_dir is None else torrserver_dir
+    if not root:
+        return ""
+    return os.path.join(root.rstrip("/"), "Cache")
+
+
 def get_cache_path():
+    cache_dir = get_cache_dir()
+    if cache_dir:
+        return cache_dir
+
     local_path = read_file(CACHE_PATH_FILE, "")
     if local_path:
         return local_path
@@ -763,7 +884,8 @@ def save_settings(params):
     auth = params.get("auth", ["0"])[0]
     username = params.get("username", [""])[0].strip()
     password = params.get("password", [""])[0]
-    cache_path = params.get("cache_path", [""])[0].strip()
+    torrserver_dir = params.get("torrserver_dir", [""])[0].strip()
+    fuse = params.get("fuse", ["0"])[0]
     https = params.get("https", ["0"])[0]
     https_port = params.get("https_port", ["8091"])[0].strip()
     force_https = params.get("force_https", ["0"])[0]
@@ -777,6 +899,22 @@ def save_settings(params):
 
     if ssl_mode not in (SSL_CERT_MODE_SELF, SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL):
         return False, "Invalid certificate mode"
+
+    if not has_privileged_access():
+        return False, "Additional DSM permissions are required to save settings"
+
+    if not torrserver_dir:
+        return False, "TorrServer directory is required"
+
+    safe_torrserver_dir = cache_browser_path(torrserver_dir)
+    if safe_torrserver_dir != torrserver_dir:
+        return False, "Invalid TorrServer directory"
+
+    ok, directory_message = prepare_torrserver_directory(torrserver_dir)
+    if not ok:
+        return False, directory_message
+
+    cache_path = get_cache_dir(torrserver_dir)
 
     if ssl_mode in (SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL) and not has_privileged_access():
         return False, "Additional DSM permissions are required for this certificate mode"
@@ -838,10 +976,11 @@ def save_settings(params):
 
     # TorrServer is still listening on old_port at this point.
     # Apply API-backed settings before changing its configured port.
-    if cache_path:
-        ok, cache_message = set_cache_path(cache_path, old_port)
-        if not ok:
-            return False, cache_message
+    ok, cache_message = set_cache_path(cache_path, old_port)
+    if not ok:
+        return False, cache_message
+
+    write_file(TORRSERVER_DIR_FILE, torrserver_dir)
 
     if auth == "1":
         account = {
@@ -854,6 +993,8 @@ def save_settings(params):
         write_file(AUTH_FILE, "1")
     else:
         write_file(AUTH_FILE, "0")
+
+    write_file(FUSE_FILE, "1" if fuse == "1" else "0")
 
     write_file(PORT_FILE, str(port_number))
     write_file(HTTPS_PORT_FILE, str(https_port_number))
@@ -1881,13 +2022,19 @@ def get_network_rates():
 def main_page(host):
     status = get_status()
 
-    port = get_port()
+    configured_port = get_port()
+    configured_https = get_https_enabled()
     auth = get_auth_enabled()
-    https = get_https_enabled()
-    https_port = get_https_port()
-    force_https = get_force_https() and https
 
-    http_action = "" if force_https else '''        <div class="web-ui-action">
+    running = get_running_ports()
+    running_http_port = running["http"]
+    running_https_port = running["https"]
+    running_ssl = running["ssl"]
+    running_force_https = running["force_https"]
+
+    http_action = ""
+    if running_http_port is not None and not running_force_https:
+        http_action = '''        <div class="web-ui-action">
             <a class="button light-button"
                href="http://{0}:{1}/"
                target="_blank">
@@ -1895,10 +2042,10 @@ def main_page(host):
             </a>
             <div class="web-ui-address">http://{0}:{1}</div>
         </div>
-'''.format(host, port)
+'''.format(host, running_http_port)
 
     https_action = ""
-    if https:
+    if running_ssl and running_https_port is not None:
         https_action = '''        <div class="web-ui-action">
             <a class="button light-button"
                href="https://{0}:{1}/"
@@ -1907,7 +2054,7 @@ def main_page(host):
             </a>
             <div class="web-ui-address">https://{0}:{1}</div>
         </div>
-'''.format(host, https_port)
+'''.format(host, running_https_port)
 
     web_ui_actions = http_action + https_action
 
@@ -1947,9 +2094,9 @@ def main_page(host):
     <div class="status-symbol">✓</div>
     <div class="status-text">
         <div class="{0}">{1}</div>
-        <div class="status-subtitle">TorrServer is running normally.</div>
+        <div class="status-subtitle">{14}</div>
     </div>
-    {14}
+    {15}
 </div>
 
 <div class="dashboard-grid">
@@ -2045,10 +2192,10 @@ def main_page(host):
         status_class,
         html.escape(status),
         html.escape(host),
-        port,
+        configured_port,
         html.escape(get_torrserver_version()),
-        port,
-        "Enabled" if https else "Disabled",
+        configured_port,
+        "Enabled" if configured_https else "Disabled",
         "Enabled" if auth else "Disabled",
         html.escape(get_torrserver_uptime()),
         html.escape(get_dsm_version()),
@@ -2056,9 +2203,51 @@ def main_page(host):
         html.escape(get_cpu_model()),
         get_cpu_cores(),
         html.escape(get_architecture()),
-         '<div class="web-ui-actions">{}</div>'.format(web_ui_actions) if web_ui_actions else '',
+        "TorrServer is running normally.",
+        '<div class="web-ui-actions">{}</div>'.format(web_ui_actions) if web_ui_actions else '',
     )
 
+    body += page_footer()
+    return localize_html(body)
+
+
+def media_recommendations_page():
+    body = page_header("Media Server Recommendations")
+    body += """
+<div class="card">
+    <h1>Media Server Recommendations</h1>
+
+    <div class="notice">
+        <strong>Plex</strong>
+        <p>
+            FUSE can be used as a media library source for Plex.
+            Keep <b>Show only active torrents</b> disabled so Plex can see the library without starting torrents.
+        </p>
+        <p>
+            To avoid unnecessary reads of large virtual files, disable <b>Perform extensive file analysis during maintenance</b>
+            and disable <b>video preview thumbnails</b> in Plex.
+        </p>
+        <p>
+            Normal library scanning can remain enabled. Background analysis and thumbnail generation
+            may read large virtual files and cause significant CPU, network and storage load.
+        </p>
+    </div>
+
+    <div class="notice">
+        <strong>Emby</strong>
+        <p>
+            FUSE can be used as a media library source for Emby.
+        </p>
+        <p>
+            Background task behavior with TorrServer FUSE has not been tested in this version.
+        </p>
+    </div>
+
+    <div class="actions">
+        <button type="button" onclick="window.close()">Close</button>
+    </div>
+</div>
+"""
     body += page_footer()
     return localize_html(body)
 
@@ -2092,10 +2281,12 @@ def permissions_page():
     return localize_html(body)
 
 
-def settings_page(message="", cache_path_override=""):
+def settings_page(message="", torrserver_dir_override=""):
+    fuse = read_file(FUSE_FILE, "0") == "1"
+    torrserver_dir = torrserver_dir_override or get_torrserver_dir()
     port = get_port()
     auth = get_auth_enabled()
-    cache_path = cache_path_override or get_cache_path()
+    cache_path = get_cache_path()
     https = get_https_enabled()
     https_port = get_https_port()
     force_https = get_force_https()
@@ -2169,6 +2360,7 @@ def settings_page(message="", cache_path_override=""):
 <div class="settings-layout">
 
 <form method="post" action="./settings">
+<fieldset {} style="border:0;padding:0;margin:0;min-width:0;">
 
 <div class="settings-card">
     <div class="settings-card-title">
@@ -2183,11 +2375,25 @@ def settings_page(message="", cache_path_override=""):
         </div>
 
         <div class="form-row">
-            <label for="cachePath">Cache directory</label>
+            <label for="torrserverDir">TorrServer directory</label>
             <div style="display:flex;gap:8px;max-width:620px;">
-                <input id="cachePath" type="text" name="cache_path" value="{}" placeholder="/volume1/...">
-                <button type="button" class="secondary" onclick="openCacheBrowser()">Browse</button>
+                <input id="torrserverDir" type="text" name="torrserver_dir" value="{}" placeholder="/volume1/...">
+                <button type="button" class="secondary" onclick="openTorrServerBrowser()">Browse</button>
             </div>
+        </div>
+
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" name="fuse" value="1" {} {}>
+                Enable FUSE filesystem
+            </label>
+        </div>
+
+        <div class="actions">
+            <button type="button" class="secondary"
+                    onclick="window.open('./recommendations', 'TorrServerRecommendations', 'width=900,height=800,resizable=yes,scrollbars=yes')">
+                Media Server Recommendations
+            </button>
         </div>
 
     </div>
@@ -2222,7 +2428,7 @@ def settings_page(message="", cache_path_override=""):
     </div>
 </div>
 
-<div class="settings-card{}">
+<div class="settings-card">
     <div class="settings-card-title">
         <span class="metric-icon">▣</span>
         <span>SSL Certificate</span>
@@ -2298,6 +2504,7 @@ def settings_page(message="", cache_path_override=""):
     </div>
 </div>
 
+</fieldset>
 </form>
 </div>
 
@@ -2315,6 +2522,8 @@ function toggleHttps() {{
     document.getElementById('httpsPort').disabled = !enabled;
     document.getElementById('sslMode').disabled = !enabled;
     document.getElementById('sslDsm').disabled = !enabled;
+    document.getElementById('sslCert').disabled = !enabled;
+    document.getElementById('sslKey').disabled = !enabled;
 }}
 
 function toggleSslMode() {{
@@ -2352,11 +2561,11 @@ function toggleAuth() {{
     }}
 }}
 
-function openCacheBrowser() {{
-    var field = document.querySelector('input[name="cache_path"]');
+function openTorrServerBrowser() {{
+    var field = document.querySelector('input[name="torrserver_dir"]');
     var path = field.value.trim();
     if (!path) path = '/';
-    window.location.href = './browse?path=' + encodeURIComponent(path);
+    window.location.href = './browse?path=' + encodeURIComponent(path) + '&target=torrserver';
 }}
 
 var passwordField = document.getElementById('password');
@@ -2381,14 +2590,16 @@ toggleSslMode();
 toggleAuth();
 </script>
 """.format(
+        "disabled" if not privileged else "",
         port,
-        html.escape(cache_path or "/volume1/downloads"),
+        html.escape(torrserver_dir, quote=True),
+        "checked" if fuse else "",
+        "disabled" if not privileged else "",
         "checked" if https else "",
         "disabled" if not privileged else "",
         https_port,
         "checked" if force_https else "",
         "" if https else "disabled",
-        " disabled" if not privileged else "",
         "selected" if ssl_mode == SSL_CERT_MODE_SELF else "",
         "selected" if ssl_mode == SSL_CERT_MODE_DSM else "",
         "disabled" if not privileged else "",
@@ -2412,6 +2623,7 @@ toggleAuth();
         html.escape(PASSWORD_PLACEHOLDER if saved_password else "", quote=True),
         "" if auth else "disabled",
         "" if privileged else "disabled",
+        "disabled" if not privileged else "",
     )
 
     body += page_footer()
@@ -2440,7 +2652,7 @@ def cache_browser_path(path):
     return real
 
 
-def cache_browser_page(path):
+def cache_browser_page(path, target="cache"):
     path = cache_browser_path(path)
 
     if path == "/":
@@ -2473,8 +2685,12 @@ def cache_browser_page(path):
         rows.append(
             '<div style="margin:6px 0;">'
             '<a class="button secondary" style="width:100%;box-sizing:border-box;text-align:left;" '
-            'href="./browse?path={}">{}/</a>'
-            '</div>'.format(quote(child, safe=""), label)
+            'href="./browse?path={}&target={}">{}/</a>'
+            '</div>'.format(
+                quote(child, safe=""),
+                quote(target, safe=""),
+                label
+            )
         )
 
     if not rows:
@@ -2482,16 +2698,25 @@ def cache_browser_page(path):
 
     parent_html = ""
     if parent is not None:
-        parent_html = '<a class="button secondary" href="./browse?path={}">..</a>'.format(
-            quote(parent, safe="")
+        parent_html = '<a class="button secondary" href="./browse?path={}&target={}">..</a>'.format(
+            quote(parent, safe=""),
+            quote(target, safe="")
         )
 
-    select_href = "./settings?cache_path={}".format(quote(path, safe=""))
+    if target == "torrserver":
+        select_href = "./settings?torrserver_dir={}".format(quote(path, safe=""))
+        page_title = "Select TorrServer directory"
+    elif target == "fuse":
+        select_href = "./settings?fuse_path={}".format(quote(path, safe=""))
+        page_title = "Select FUSE directory"
+    else:
+        select_href = "./settings?cache_path={}".format(quote(path, safe=""))
+        page_title = "Select cache directory"
 
-    body = page_header("Select cache directory")
+    body = page_header(page_title)
     body += """
 <div class="card">
-<h1>Select cache directory</h1>
+<h1>{}</h1>
 <p><b>Current:</b> <code>{}</code></p>
 <div style="margin-bottom:15px;">
 {}
@@ -2504,6 +2729,7 @@ def cache_browser_page(path):
 </div>
 </div>
 """.format(
+        page_title,
         html.escape(path),
         parent_html,
         select_href,
@@ -2623,18 +2849,27 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/settings":
             query = parse_qs(parsed.query)
-            cache_path = query.get("cache_path", [""])[0]
-            self.send_html(settings_page(cache_path_override=cache_path))
+            torrserver_dir = query.get("torrserver_dir", [""])[0]
+            self.send_html(
+                settings_page(
+                    torrserver_dir_override=torrserver_dir
+                )
+            )
             return
 
         if path == "/permissions":
             self.send_html(permissions_page())
             return
 
+        if path == "/recommendations":
+            self.send_html(media_recommendations_page())
+            return
+
         if path == "/browse":
             query = parse_qs(parsed.query)
             selected_path = query.get("path", ["/"])[0]
-            self.send_html(cache_browser_page(selected_path))
+            target = query.get("target", ["cache"])[0]
+            self.send_html(cache_browser_page(selected_path, target))
             return
 
         if path == "/logs":
