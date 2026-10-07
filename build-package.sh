@@ -5,20 +5,103 @@ TORRSERVER_VERSION=$1
 ARCH=$2
 PKG_VERSION=$3
 
+# Pinned SHA-256 sums of everything that is downloaded (one "<hash>  <key>" per
+# line). Without a pin a download is only trusted on first use:
+#   UPDATE_CHECKSUMS=1   pin sums that are not recorded yet (see `make checksums`)
+#   REQUIRE_CHECKSUMS=1  refuse downloads that have no pinned sum
+#   DOWNLOAD_ONLY=1      stop after downloading
+CHECKSUM_FILE="${CHECKSUM_FILE:-checksums.sha256}"
+
+sha256_of() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+verify_checksum() {
+    local file=$1
+    local key=$2
+    local actual expected
+
+    actual="$(sha256_of "${file}")"
+    expected=""
+
+    if [[ -f ${CHECKSUM_FILE} ]]; then
+        expected="$(awk -v k="${key}" '$2 == k {print $1; exit}' "${CHECKSUM_FILE}")"
+    fi
+
+    if [[ -n ${expected} ]]; then
+        if [[ ${expected} != "${actual}" ]]; then
+            rm -f "${file}"
+            echo "ERROR: checksum mismatch for ${key}" >&2
+            echo "  expected ${expected}" >&2
+            echo "  actual   ${actual}" >&2
+            exit 1
+        fi
+        echo ">>> Checksum OK: ${key}"
+    elif [[ ${UPDATE_CHECKSUMS:-0} == 1 ]]; then
+        echo "${actual}  ${key}" >> "${CHECKSUM_FILE}"
+        echo ">>> Pinned ${key}"
+    elif [[ ${REQUIRE_CHECKSUMS:-0} == 1 ]]; then
+        rm -f "${file}"
+        echo "ERROR: no pinned checksum for ${key} (run: make checksums)" >&2
+        exit 1
+    else
+        echo ">>> WARNING: no pinned checksum for ${key} (${actual})" >&2
+    fi
+}
+
+# Downloads are cached per version and written to a temporary file first, so a
+# changed TORRSERVER_VERSION is fetched again and an interrupted download is
+# never mistaken for a finished one.
+download_file() {
+    local url=$1
+    local dest=$2
+    local part="${dest}.part"
+
+    rm -f "${part}"
+    mkdir -p "$(dirname "${dest}")"
+
+    if ! wget -q -O "${part}" "${url}"; then
+        rm -f "${part}"
+        echo "ERROR: download failed: ${url}" >&2
+        exit 1
+    fi
+
+    if [[ ! -s ${part} ]]; then
+        rm -f "${part}"
+        echo "ERROR: empty download: ${url}" >&2
+        exit 1
+    fi
+
+    mv -f "${part}" "${dest}"
+}
+
+torrserver_bin_path() {
+    echo "dest_bin/${TORRSERVER_VERSION}/TorrServer-linux-${ARCH}"
+}
+
 download_torrserver() {
     local base_url="https://github.com/YouROK/TorrServer/releases/download/${TORRSERVER_VERSION}"
     local bin_name="TorrServer-linux-${ARCH}"
-    local src_bin="${base_url}/${bin_name}"
-    local dest_bin="dest_bin"
+    local dest_bin
+    dest_bin="$(torrserver_bin_path)"
 
-    if [[ -f ${dest_bin}/TorrServer-linux-${ARCH} ]]; then
-        echo ">>> Binaries already exist: ${bin_name}"
+    if [[ -s ${dest_bin} ]]; then
+        echo ">>> Binaries already exist: ${bin_name} (${TORRSERVER_VERSION})"
+        verify_checksum "${dest_bin}" "TorrServer-${TORRSERVER_VERSION}-linux-${ARCH}"
         return
     fi
 
-    echo ">>> Downloading TorrServer-linux-${ARCH}:"
-    mkdir -p "${dest_bin}"
-    wget -q -P ${dest_bin} ${src_bin}
+    echo ">>> Downloading ${bin_name} ${TORRSERVER_VERSION}:"
+    download_file "${base_url}/${bin_name}" "${dest_bin}"
+
+    # Guard against saving an HTML error page as the binary.
+    if [[ "$(head -c 4 "${dest_bin}" | od -An -c | tr -d ' ')" != '177ELF' ]]; then
+        rm -f "${dest_bin}"
+        echo "ERROR: ${bin_name} is not an ELF binary" >&2
+        exit 1
+    fi
+
+    verify_checksum "${dest_bin}" "TorrServer-${TORRSERVER_VERSION}-linux-${ARCH}"
 }
 
 download_ffprobe() {
@@ -52,7 +135,9 @@ download_ffprobe() {
 
     mkdir -p "${dest_bin}" "${tmp_dir}"
 
-    wget -q -O "${tmp_dir}/ffprobe.zip" "${ffprobe_url}"
+    download_file "${ffprobe_url}" "${tmp_dir}/ffprobe.zip"
+    # Verify the archive before it is unpacked.
+    verify_checksum "${tmp_dir}/ffprobe.zip" "$(basename "${ffprobe_url}")"
     unzip -q "${tmp_dir}/ffprobe.zip" -d "${tmp_dir}"
 
     mv "${tmp_dir}/ffprobe" "${ffprobe_bin}"
@@ -65,7 +150,8 @@ make_inner_pkg() {
     local tmp_dir=$1
     local dest_dir=$2
     local dest_pkg="$dest_dir/package.tgz"
-    local torrserver_bin="dest_bin/TorrServer-linux-${ARCH}"
+    local torrserver_bin
+    torrserver_bin="$(torrserver_bin_path)"
     local ffprobe_bin="dest_bin/ffprobe-${ARCH}"
 
     echo ">>> Making inner package.tgz"
@@ -130,6 +216,12 @@ main() {
 
     download_ffprobe
     download_torrserver
+
+    if [[ ${DOWNLOAD_ONLY:-0} == 1 ]]; then
+        echo ">>> Download only, skipping package build"
+        return
+    fi
+
     make_pkg
 
     echo ">>> Done"

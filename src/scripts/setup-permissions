@@ -21,10 +21,19 @@ fi
 
 /bin/rm -f "${TMP_FILE}"
 
-/bin/sh -c "printf '%s\\n' 'TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}, ${PREPARE_DIRECTORY}' > '${TMP_FILE}'" || exit 1
+printf '%s\n' "TorrServer ALL=(root) NOPASSWD: ${RESTART_SCRIPT}, ${CERTIFICATE_HELPER}, ${PREPARE_DIRECTORY}" > "${TMP_FILE}" || exit 1
 
 /bin/chmod 0440 "${TMP_FILE}" || exit 1
-/bin/chown root:root "${TMP_FILE}" 2>/dev/null || true
+/bin/chown root:root "${TMP_FILE}" || exit 1
+
+# A syntax error in /etc/sudoers.d breaks sudo for the whole system.
+if command -v visudo >/dev/null 2>&1; then
+    if ! visudo -cf "${TMP_FILE}" >/dev/null 2>&1; then
+        /bin/rm -f "${TMP_FILE}"
+        echo "Generated sudoers file failed validation."
+        exit 1
+    fi
+fi
 
 /bin/mv -f "${TMP_FILE}" "${SUDOERS_FILE}" || exit 1
 

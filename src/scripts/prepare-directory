@@ -1,19 +1,41 @@
 #!/bin/sh
+#
+# Runs as root through sudo. The argument is untrusted: it is resolved and
+# must stay inside a /volumeN/ share, and symlinks are never followed.
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "This script must be run as root."
     exit 1
 fi
 
+# Exit code 64 (EX_USAGE) is distinct from sudo's own refusal (1), so the
+# Helper can probe "is this script allowed through sudo?" without a directory
+# and without depending on sudo's (localized) messages.
 if [ "$#" -ne 1 ]; then
     echo "Usage: prepare-directory <TorrServer directory>"
-    exit 1
+    exit 64
 fi
 
-TORRSERVER_DIR="$1"
+INPUT="$1"
 
-case "${TORRSERVER_DIR}" in
-    /volume[0-9]|/volume[0-9]/|/volume[0-9]/*)
+case "${INPUT}" in
+    */../*|*/..|../*|..)
+        echo "Invalid TorrServer directory."
+        exit 1
+        ;;
+    *[[:space:]]*)
+        echo "TorrServer directory must not contain spaces."
+        exit 1
+        ;;
+esac
+
+# Strip trailing slashes.
+while [ "${INPUT}" != "/" ] && [ "${INPUT%/}" != "${INPUT}" ]; do
+    INPUT="${INPUT%/}"
+done
+
+case "${INPUT}" in
+    /volume[0-9]/?*|/volume[0-9][0-9]/?*)
         ;;
     *)
         echo "Invalid TorrServer directory."
@@ -21,32 +43,46 @@ case "${TORRSERVER_DIR}" in
         ;;
 esac
 
-case "${TORRSERVER_DIR}" in
-    /volume[0-9]|/volume[0-9]/)
-        echo "Invalid TorrServer directory."
-        exit 1
-        ;;
-esac
+if [ -L "${INPUT}" ]; then
+    echo "TorrServer directory must not be a symbolic link."
+    exit 1
+fi
 
-TORRSERVER_DIR="${TORRSERVER_DIR%/}"
-CACHE_DIR="${TORRSERVER_DIR}/Cache"
-FUSE_DIR="${TORRSERVER_DIR}/FUSE"
-
-if [ ! -e "${TORRSERVER_DIR}" ]; then
-    if ! /bin/mkdir -p "${TORRSERVER_DIR}"; then
+if [ ! -e "${INPUT}" ]; then
+    if ! /bin/mkdir -p "${INPUT}"; then
         echo "Failed to create TorrServer directory."
         exit 1
     fi
 fi
 
-if [ ! -d "${TORRSERVER_DIR}" ]; then
+if [ ! -d "${INPUT}" ]; then
     echo "TorrServer directory is not a directory."
     exit 1
 fi
 
+# Resolve again after creation: no component may point outside /volumeN/.
+TORRSERVER_DIR="$(readlink -f -- "${INPUT}" 2>/dev/null)"
+
+case "${TORRSERVER_DIR}" in
+    /volume[0-9]/?*|/volume[0-9][0-9]/?*)
+        ;;
+    *)
+        echo "Invalid TorrServer directory."
+        exit 1
+        ;;
+esac
+
+CACHE_DIR="${TORRSERVER_DIR}/Cache"
+FUSE_DIR="${TORRSERVER_DIR}/FUSE"
+
 prepare_subdir()
 {
     SUBDIR="$1"
+
+    if [ -L "${SUBDIR}" ]; then
+        echo "TorrServer subdirectory must not be a symbolic link: ${SUBDIR}"
+        return 1
+    fi
 
     if [ -e "${SUBDIR}" ]; then
         if [ ! -d "${SUBDIR}" ]; then
@@ -69,7 +105,7 @@ prepare_subdir()
         return 1
     fi
 
-    if ! /bin/chown TorrServer:TorrServer "${SUBDIR}"; then
+    if ! /bin/chown -h TorrServer:TorrServer "${SUBDIR}"; then
         echo "Failed to set directory ownership: ${SUBDIR}"
         return 1
     fi

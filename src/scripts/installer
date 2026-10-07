@@ -102,13 +102,9 @@ postinst ()
     # and don't override old configurations
     call_func "syno_sync_var_folder" install_log
 
-    # FUSE configuration
+    # Default settings files (never override existing ones)
     if [ ! -e "${SYNOPKG_PKGVAR}/torrserver.fuse" ]; then
         printf '0\n' > "${SYNOPKG_PKGVAR}/torrserver.fuse"
-    fi
-
-    if [ ! -e "${SYNOPKG_PKGVAR}/torrserver.fuse.path" ]; then
-        printf '\n' > "${SYNOPKG_PKGVAR}/torrserver.fuse.path"
     fi
 
     if [ ! -e "${SYNOPKG_PKGVAR}/torrserver.dir" ]; then
@@ -117,12 +113,10 @@ postinst ()
 
     chown TorrServer:TorrServer \
         "${SYNOPKG_PKGVAR}/torrserver.fuse" \
-        "${SYNOPKG_PKGVAR}/torrserver.fuse.path" \
         "${SYNOPKG_PKGVAR}/torrserver.dir"
 
     chmod 0600 \
         "${SYNOPKG_PKGVAR}/torrserver.fuse" \
-        "${SYNOPKG_PKGVAR}/torrserver.fuse.path" \
         "${SYNOPKG_PKGVAR}/torrserver.dir"
 
     call_func "service_postinst" install_log

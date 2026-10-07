@@ -1,0 +1,12 @@
+[{
+  "step_title": "Upgrade TorrServer DSM",
+  "items": [{
+    "type": "multiselect",
+    "desc": "Your settings are kept by default. Obsolete files from older package versions are always cleaned up.",
+    "subitems": [{
+      "key": "wizard_reset_settings",
+      "desc": "<b style=\"color: red\">Reset package settings to defaults</b> (ports, authentication, HTTPS, directory, language). Torrents and TorrServer's own database are kept.",
+      "defaultValue": false
+    }]
+  }]
+}]

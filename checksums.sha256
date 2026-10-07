@@ -1,0 +1,9 @@
+# SHA-256 sums of downloaded build inputs: "<sha256>  <key>".
+# Generate with `make checksums`, review, then commit. As soon as this file
+# contains entries, CI refuses downloads that are not pinned here.
+cb690c360042b51d9e901db2b0185c585330c1067b5c5edf0b6a5e26e0375e2a  ffprobe-6.1-linux-64.zip
+0bbe73b2efc7391a59cd45adbb1bd6ed4b9571b7f62f04027a3e0ae41d23aa5d  TorrServer-MatriX.145.2-linux-amd64
+c99358a90d93ada454e2f4dd26cd25718d36b4032b0ad5539425eac6e66349d8  ffprobe-6.1-linux-arm-64.zip
+7447ea61d806890d3a890f428ead86a3221128484f50ed03cbb1a6c6efac171e  TorrServer-MatriX.145.2-linux-arm64
+5445d7b9a5b4c9032f48a764c06838fa3568a7019bd5746c84d5c980c277bffd  ffprobe-6.1-linux-armhf-32.zip
+04a002c956417f24b6d8544f927c132423a06c706d1f05d760cbe9ebcba4e014  TorrServer-MatriX.145.2-linux-arm7
