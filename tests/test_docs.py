@@ -78,6 +78,19 @@ class ReadmeTests(unittest.TestCase):
         self.assertTrue(any(s.startswith("Folder access") for s in top_level))
 
 
+class VersionTests(unittest.TestCase):
+    def test_package_version_ends_with_the_torrserver_build(self):
+        """PKG_VERSION is <package version>.<TorrServer build>, e.g. 2.3.145.2."""
+        torrserver = re.search(r"^TORRSERVER_VERSION\s*:=\s*(\S+)", MAKEFILE, re.M).group(1)
+        package = re.search(r"^PKG_VERSION\s*:=\s*(\S+)", MAKEFILE, re.M).group(1)
+        build = re.sub(r"^\D+\.", "", torrserver)          # MatriX.145.2 -> 145.2
+        self.assertRegex(
+            package, r"^\d+\.\d+\." + re.escape(build) + r"$",
+            "PKG_VERSION is %s but TORRSERVER_VERSION is %s: the package version must be "
+            "<your version>.%s (raise the first two numbers for a new package release; "
+            "the last ones are the TorrServer build)" % (package, torrserver, build))
+
+
 class ChangelogTests(unittest.TestCase):
     def entries(self):
         return re.findall(r"^## (\S+) \((\d{4}-\d{2}-\d{2})\)\s*$", CHANGELOG, re.M)

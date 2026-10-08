@@ -21,7 +21,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
 
-
 # The helper is only reachable through DSM nginx (see nginx/TorrServer.conf),
 # which proxies to 127.0.0.1. It must never listen on a public interface: it
 # has no authentication of its own.
@@ -31,7 +30,6 @@ HELPER_PORT = 42777
 MAX_POST_BYTES = 64 * 1024
 USERNAME_MAX_LENGTH = 64
 
-PACKAGE_NAME = "TorrServer"
 # TORRSERVER_DSM_VAR exists for the test suite; DSM never sets it.
 PACKAGE_VAR = os.environ.get("TORRSERVER_DSM_VAR") or "/var/packages/TorrServer/var"
 TORRSERVER_BIN = "/var/packages/TorrServer/target/bin/TorrServer"
@@ -53,7 +51,6 @@ PORT_FILE = os.path.join(PACKAGE_VAR, "torrserver.port")
 AUTH_FILE = os.path.join(PACKAGE_VAR, "torrserver.auth")
 ACCS_FILE = os.path.join(PACKAGE_VAR, "accs.db")
 TORRSERVER_DIR_FILE = os.path.join(PACKAGE_VAR, "torrserver.dir")
-CACHE_PATH_FILE = os.path.join(PACKAGE_VAR, "cache.path")
 # Cache directory chosen while TorrServer was not running; applied by
 # pending_cache_loop() as soon as the API answers.
 CACHE_PENDING_FILE = os.path.join(PACKAGE_VAR, "cache.pending")
@@ -513,78 +510,6 @@ def get_cpu_model():
     return "Unknown"
 
 
-def get_memory():
-    total = 0
-    available = 0
-
-    try:
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.split()
-
-                if len(parts) < 2:
-                    continue
-
-                value = int(parts[1]) * 1024
-
-                if line.startswith("MemTotal:"):
-                    total = value
-
-                elif line.startswith("MemAvailable:"):
-                    available = value
-
-    except Exception:
-        pass
-
-    return total, available
-
-
-def format_bytes(value):
-    if value <= 0:
-        return "Unknown"
-
-    units = ["B", "KB", "MB", "GB", "TB"]
-
-    size = float(value)
-
-    for unit in units:
-        if size < 1024:
-            return "{:.1f} {}".format(size, unit)
-
-        size /= 1024
-
-    return "{:.1f} PB".format(size)
-
-
-def get_uptime():
-    try:
-        seconds = float(read_file("/proc/uptime", "0").split()[0])
-
-        days = int(seconds // 86400)
-        hours = int((seconds % 86400) // 3600)
-        minutes = int((seconds % 3600) // 60)
-
-        if days:
-            return "{}d {}h {}m".format(days, hours, minutes)
-
-        if hours:
-            return "{}h {}m".format(hours, minutes)
-
-        return "{}m".format(minutes)
-
-    except Exception:
-        return "Unknown"
-
-
-def get_load():
-    try:
-        with open("/proc/loadavg", "r", encoding="utf-8") as f:
-            return f.read().split()[0]
-
-    except Exception:
-        return "Unknown"
-
-
 def get_cpu_cores():
     try:
         return os.cpu_count() or 1
@@ -974,7 +899,7 @@ def prepare_directory_directly(torrserver_dir):
         except FileExistsError:
             continue
         except OSError as e:
-            raise ValueError("Failed to create {}: {}".format(path, e))
+            raise ValueError("Failed to create TorrServer subdirectory: {} ({})".format(path, e))
 
     return True
 
@@ -1111,13 +1036,6 @@ def _local_tls_context():
     return context
 
 
-def torrserver_api(payload, http_port=None):
-    """Return ``(True, data)`` or ``(False, error_message)``; see
-    :func:`torrserver_request`."""
-    ok, data, _reachable = torrserver_request(payload, http_port)
-    return ok, data
-
-
 def torrserver_request(payload, http_port=None):
     """POST *payload* to the running TorrServer ``/settings`` endpoint.
 
@@ -1188,29 +1106,6 @@ def _find_key(data, name):
     return None
 
 
-def get_cache_path():
-    cache_dir = get_cache_dir()
-    if cache_dir:
-        return cache_dir
-
-    local_path = read_file(CACHE_PATH_FILE, "")
-    if local_path:
-        return local_path
-
-    ok, data = torrserver_api({"action": "get"})
-    if ok and isinstance(data, dict):
-        key = _find_key(data, "TorrentsSavePath")
-        path = str(data.get(key, "") or "").strip() if key else ""
-        if path:
-            try:
-                write_file(CACHE_PATH_FILE, path)
-            except OSError:
-                pass
-            return path
-
-    return "/volume1/downloads"
-
-
 def set_cache_path(cache_path, port=None):
     """Apply the cache directory to the running TorrServer.
 
@@ -1231,7 +1126,7 @@ def set_cache_path(cache_path, port=None):
         return "error", "Unable to read TorrServer settings: {}".format(data)
 
     if not isinstance(data, dict) or not data:
-        return "error", "Unable to read TorrServer settings: empty response"
+        return "error", "TorrServer returned empty settings"
 
     key = _find_key(data, "TorrentsSavePath") or "TorrentsSavePath"
 
@@ -1243,7 +1138,6 @@ def set_cache_path(cache_path, port=None):
         if not ok:
             return "error", "Unable to apply cache directory: {}".format(result)
 
-    write_file(CACHE_PATH_FILE, cache_path)
     remove_file(CACHE_PENDING_FILE)
     return "applied", ""
 
@@ -1345,13 +1239,21 @@ def is_port_in_use(port_number, allowed_ports=None):
     return port_number in (get_listening_tcp_ports() - allowed_ports)
 
 
-def parse_port(value, label):
+# Every message is a complete sentence so it can be translated as a whole
+# (translations are matched as text; a number in the middle would prevent that).
+WEB_PORT_ERRORS = ("Web port is invalid", "Web port must be between 1024 and 65535")
+HTTPS_PORT_ERRORS = ("HTTPS port is invalid", "HTTPS port must be between 1024 and 65535")
+
+
+def parse_port(value, errors):
+    invalid, out_of_range = errors
+
     if not value.isdigit():
-        return None, "Invalid {}".format(label)
+        return None, invalid
 
     number = int(value)
     if number < 1024 or number > 65535:
-        return None, "{} must be between 1024 and 65535".format(label)
+        return None, out_of_range
 
     return number, ""
 
@@ -1410,37 +1312,37 @@ def save_settings(params):
         if (ssl_cert, ssl_key) not in valid:
             return False, "Invalid DSM certificate selection"
 
-    port_number, error = parse_port(port, "Web port")
+    port_number, error = parse_port(port, WEB_PORT_ERRORS)
     if port_number is None:
         return False, error
 
-    https_port_number, error = parse_port(https_port, "HTTPS port")
+    https_port_number, error = parse_port(https_port, HTTPS_PORT_ERRORS)
     if https_port_number is None:
         return False, error
 
     if port_number == HELPER_PORT:
-        return False, "Web port {} is reserved for TorrServer Helper".format(port_number)
+        return False, "Web port is reserved for TorrServer Helper: {}".format(port_number)
 
     if is_port_in_use(port_number, allowed_ports={old_port}):
-        return False, "Web port {} is already in use".format(port_number)
+        return False, "Web port is already in use: {}".format(port_number)
 
     # The HTTPS port only matters when HTTPS is enabled.
     if https == "1":
         if https_port_number == HELPER_PORT:
-            return False, "HTTPS port {} is reserved for TorrServer Helper".format(https_port_number)
+            return False, "HTTPS port is reserved for TorrServer Helper: {}".format(https_port_number)
 
         if https_port_number == port_number:
             return False, "HTTPS port must differ from Web port"
 
         if is_port_in_use(https_port_number, allowed_ports={old_https_port}):
-            return False, "HTTPS port {} is already in use".format(https_port_number)
+            return False, "HTTPS port is already in use: {}".format(https_port_number)
 
     if auth == "1":
         if not username:
             return False, "Username is required"
 
         if not valid_username(username):
-            return False, "Username must not contain ':' or control characters"
+            return False, "Username must not contain a colon or control characters"
 
         if password == PASSWORD_PLACEHOLDER or not password:
             # The stored password may only be reused for the same account.
@@ -1482,10 +1384,6 @@ def save_settings(params):
         return True, "Settings saved. The cache directory is applied when TorrServer starts"
 
     return True, "Settings saved"
-
-
-def get_log():
-    return get_log_by_name("TorrServer.log")
 
 
 def get_log_path(name):
@@ -1571,16 +1469,6 @@ body {{
     padding: 14px 18px 30px;
 }}
 
-.nav {{
-    display: flex;
-    gap: 6px;
-    margin: 0 0 10px 0;
-}}
-
-.nav a {{
-    margin: 0;
-}}
-
 .card {{
     background: #fff;
     border: 1px solid #d6d9de;
@@ -1599,14 +1487,6 @@ body {{
 .card h2 {{
     margin: 0 0 12px;
     font-size: 20px;
-    font-weight: 600;
-}}
-
-.section-title {{
-    margin: 22px 0 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #d9dce1;
-    font-size: 18px;
     font-weight: 600;
 }}
 
@@ -1685,20 +1565,6 @@ button.danger:disabled,
     cursor: not-allowed;
 }}
 
-.nav .button {{
-    min-height: 34px;
-    padding: 7px 16px;
-    border-radius: 4px;
-}}
-
-.nav .button.secondary {{
-    background: #666;
-}}
-
-.nav .button.active {{
-    background: #1677ff;
-}}
-
 .status-running {{
     color: #16803c;
     font-weight: 600;
@@ -1763,23 +1629,9 @@ pre {{
     line-height: 1.35;
 }}
 
-.toolbar {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 14px;
-}}
-
-.toolbar select {{
-    width: auto;
-    min-width: 220px;
-}}
-
 .checkbox-row {{
     margin: 8px 0;
 }}
-
 
 .app-shell {{
     display: flex;
@@ -1794,35 +1646,6 @@ pre {{
     background: #ffffff;
     border-right: 1px solid #d6dee8;
     padding: 18px 10px;
-}}
-
-.app-brand {{
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px 20px;
-    border-bottom: 1px solid #e2e8f0;
-    margin-bottom: 12px;
-}}
-
-.app-icon {{
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #1d7ff2, #4b9cff);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    box-shadow: 0 2px 5px rgba(0,0,0,.16);
-}}
-
-.app-name {{
-    font-size: 17px;
-    font-weight: 600;
-    color: #17233b;
 }}
 
 .side-item {{
@@ -1877,18 +1700,6 @@ pre {{
     align-items: center;
     padding: 18px 22px;
     margin-bottom: 18px;
-}}
-
-.status-symbol {{
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    background: #24b34b;
-    color: #fff;
-    font-size: 38px;
-    line-height: 58px;
-    text-align: center;
-    margin-right: 18px;
 }}
 
 .status-logo {{
@@ -1984,158 +1795,8 @@ pre {{
     color: #1d2e49;
 }}
 
-.metric-card {{
-    min-height: 190px;
-}}
-
-.usage-layout {{
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    padding-top: 12px;
-}}
-
-.usage-value {{
-    width: 72px;
-    flex: 0 0 72px;
-    font-size: 30px;
-    font-weight: 600;
-    color: #1c2f4e;
-}}
-
-.usage-chart,
-.network-chart {{
-    position: relative;
-    height: 105px;
-    flex: 1;
-    overflow: hidden;
-    border-left: 1px solid #e4eaf1;
-    border-bottom: 1px solid #e4eaf1;
-}}
-
-.chart-grid {{
-    position: absolute;
-    inset: 0;
-    background-image:
-        linear-gradient(to bottom, #edf1f6 1px, transparent 1px),
-        linear-gradient(to right, #f2f5f8 1px, transparent 1px);
-    background-size: 100% 25%, 20% 100%;
-}}
-
-.chart-line {{
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 10%;
-    height: 3px;
-    background: #2e91f7;
-    transform: skewY(-2deg);
-    box-shadow:
-        35px -3px 0 -1px #2e91f7,
-        70px 2px 0 -1px #2e91f7,
-        105px -5px 0 -1px #2e91f7,
-        140px 1px 0 -1px #2e91f7,
-        175px -7px 0 -1px #2e91f7,
-        210px 0 0 -1px #2e91f7,
-        245px -3px 0 -1px #2e91f7;
-}}
-
-.memory-layout {{
-    padding-top: 12px;
-}}
-
-.memory-value {{
-    font-size: 30px;
-    font-weight: 600;
-    color: #1c2f4e;
-    margin-bottom: 12px;
-}}
-
-.memory-bar {{
-    height: 14px;
-    background: #e4ebf3;
-    border-radius: 7px;
-    overflow: hidden;
-    margin-bottom: 10px;
-}}
-
-.memory-fill {{
-    height: 100%;
-    background: #3298f5;
-    border-radius: 7px;
-}}
-
-.memory-details {{
-    color: #64748b;
-    line-height: 1.55;
-}}
-
-.network-card {{
-    grid-column: 1 / -1;
-}}
-
-.network-layout {{
-    display: flex;
-    gap: 26px;
-    align-items: center;
-    padding-top: 12px;
-}}
-
-.network-values {{
-    display: flex;
-    gap: 38px;
-    min-width: 290px;
-}}
-
-.network-rate {{
-    display: grid;
-    grid-template-columns: auto auto;
-    column-gap: 8px;
-    align-items: center;
-}}
-
-.network-rate .network-arrow {{
-    grid-row: 1 / 3;
-    font-size: 32px;
-    font-weight: 600;
-}}
-
-.network-rate strong {{
-    font-size: 22px;
-}}
-
-.network-rate small {{
-    color: #64748b;
-    font-size: 13px;
-}}
-
-.upload {{
-    color: #1677ff;
-}}
-
 .download {{
     color: #20a04b;
-}}
-
-.network-chart {{
-    height: 115px;
-}}
-
-.network-line {{
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 18%;
-    height: 3px;
-    background: #2e91f7;
-    box-shadow:
-        55px -4px 0 0 #27a94d,
-        95px 1px 0 0 #2e91f7,
-        145px -7px 0 0 #27a94d,
-        205px 3px 0 0 #2e91f7,
-        260px -10px 0 0 #27a94d,
-        320px 1px 0 0 #2e91f7,
-        380px -14px 0 0 #27a94d;
 }}
 
 .settings-layout {{
@@ -2252,60 +1913,64 @@ pre {{
 @media (max-width: 800px) {{
     .container {{
         padding: 10px;
+    
+    
     }}
 
     .app-shell {{
         margin: -10px -10px -30px;
+    
+    
     }}
 
     .app-sidebar {{
         width: 170px;
         flex-basis: 170px;
+    
+    
     }}
 
     .app-content {{
         padding: 18px 14px 28px;
+    
+    
     }}
 
     .dashboard-grid {{
         grid-template-columns: 1fr;
+    
+    
     }}
 
     .settings-card .form-row {{
         grid-template-columns: 1fr;
         gap: 6px;
+    
+    
     }}
 
     .settings-card input[type=text],
-    .settings-card input[type=password],
-    .settings-card input[type=number],
-    .settings-card select {{
+.settings-card input[type=password],
+.settings-card input[type=number],
+.settings-card select {{
         max-width: 100%;
+    
+    
     }}
 
     .logs-toolbar {{
         align-items: stretch;
         flex-direction: column;
+    
+    
     }}
 
     .logs-toolbar select {{
         width: 100%;
-    }}
-
-    .network-card {{
-        grid-column: auto;
-    }}
-
-    .network-layout {{
-        flex-direction: column;
-        align-items: stretch;
-    }}
-
-    .network-values {{
-        min-width: 0;
+    
+    
     }}
 }}
-
 
 .web-ui-actions {{
     display: flex;
@@ -2415,18 +2080,23 @@ pre {{
     .info-layout {{
         flex-direction: column;
         align-items: stretch;
+    
+    
     }}
 
     .info-links {{
         justify-content: flex-start;
+    
+    
     }}
 
     .info-maintainer-top {{
         position: static;
         margin-bottom: 8px;
+    
+    
     }}
 }}
-
 </style>
 </head>
 <body>
@@ -2459,61 +2129,6 @@ def app_sidebar(active):
         )
     parts.append("</div>")
     return "".join(parts)
-
-
-
-def get_network_usage():
-    try:
-        rx = 0
-        tx = 0
-
-        with open("/proc/net/dev", "r", encoding="utf-8") as f:
-            for line in f:
-                if ":" not in line:
-                    continue
-
-                interface, data = line.split(":", 1)
-                interface = interface.strip()
-
-                if interface == "lo":
-                    continue
-
-                values = data.split()
-
-                if len(values) >= 9:
-                    rx += int(values[0])
-                    tx += int(values[8])
-
-        return rx, tx
-
-    except Exception:
-        return 0, 0
-
-
-def format_rate(bytes_per_second):
-    if bytes_per_second < 1024:
-        return "{} B/s".format(int(bytes_per_second))
-
-    if bytes_per_second < 1024 * 1024:
-        return "{:.1f} KB/s".format(bytes_per_second / 1024.0)
-
-    return "{:.1f} MB/s".format(
-        bytes_per_second / (1024.0 * 1024.0)
-    )
-
-
-def get_network_rates():
-    rx1, tx1 = get_network_usage()
-    time.sleep(0.15)
-    rx2, tx2 = get_network_usage()
-
-    interval = 0.15
-
-    return (
-        max(0, (rx2 - rx1) / interval),
-        max(0, (tx2 - tx1) / interval),
-    )
-
 
 
 def get_status_logo_data_uri():
@@ -2794,7 +2409,6 @@ def settings_page(message="", torrserver_dir_override=""):
     torrserver_dir = torrserver_dir_override or get_torrserver_dir()
     port = get_port()
     auth = get_auth_enabled()
-    cache_path = get_cache_path()
     https = get_https_enabled()
     https_port = get_https_port()
     force_https = get_force_https()
@@ -3370,13 +2984,19 @@ class Handler(BaseHTTPRequestHandler):
                 return value
         return ""
 
-    def send_denied(self):
-        self.send_html(
-            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Access denied</title></head>"
+    def send_message_page(self, title, text, status):
+        """A tiny page with a title and one sentence, translated like the rest."""
+        page = (
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>{title}</title></head>"
             "<body style=\"font-family:Arial,sans-serif;margin:40px\">"
-            "<h2>Access denied</h2>"
-            "<p>Sign in to DSM as an administrator and open "
-            "<b>TorrServer DSM</b> from the DSM main menu.</p></body></html>",
+            "<h2>{title}</h2><p>{text}</p></body></html>"
+        ).format(title=html.escape(title), text=html.escape(text))
+        self.send_html(localize_html(page), status)
+
+    def send_denied(self):
+        self.send_message_page(
+            "Access denied",
+            "Sign in to DSM as an administrator and open the TorrServer DSM application.",
             403,
         )
 
@@ -3579,7 +3199,11 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if not self.is_same_origin():
-            self.send_text("Forbidden: cross-site request rejected", 403)
+            self.send_message_page(
+                "Forbidden",
+                "Cross-site request rejected. Reload the page and try again.",
+                403,
+            )
             return
 
         params = self.read_post_params()

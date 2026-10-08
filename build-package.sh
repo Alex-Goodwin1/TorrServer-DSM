@@ -179,7 +179,8 @@ make_inner_pkg() {
 make_spk() {
     local spk_tmp_dir=$1
     local spk_dest_dir="./spk"
-    local pkg_size=$(cat "${spk_tmp_dir}/extractsize_tmp")
+    local pkg_size
+    pkg_size=$(cat "${spk_tmp_dir}/extractsize_tmp")
     local spk_filename="TorrServer-DSM-${TORRSERVER_VERSION}-${ARCH}.spk"
 
     echo ">>> Making spk: ${spk_filename}"
@@ -201,8 +202,9 @@ make_spk() {
 make_pkg() {
     mkdir -p ./build
 
-    local pkg_temp_dir=$(mktemp -d -p ./build)
-    local spk_temp_dir=$(mktemp -d -p ./build)
+    local pkg_temp_dir spk_temp_dir
+    pkg_temp_dir=$(mktemp -d -p ./build)
+    spk_temp_dir=$(mktemp -d -p ./build)
 
     make_inner_pkg ${pkg_temp_dir} ${spk_temp_dir}
     make_spk ${spk_temp_dir}

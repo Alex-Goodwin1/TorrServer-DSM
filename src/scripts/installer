@@ -1,15 +1,10 @@
 #!/bin/sh
 
-# DSM 5 -> 7 upgrade path:
-# - Not supported
-# DSM 6 -> 7 upgrade path:
-# - files are migrated from ${SYNOPKG_PKGDEST}/var to ${SYNOPKG_PKGVAR}
+# DSM 7.3 or newer only. The package ships no var/ or config/ folder, so
+# there is nothing to migrate from older DSM versions and nothing to sync.
 
 # installer log is not writable, use for reference only.
 INST_LOG="/var/log/packages/${SYNOPKG_PKGNAME}.log"
-
-# Temporary directory when the package is upgrading
-TMP_DIR="${SYNOPKG_TEMP_UPGRADE_FOLDER}"
 
 install_log ()
 {
@@ -65,32 +60,11 @@ if [ -r "${SVC_SETUP}" ]; then
 fi
 
 
-# Synchronize files shipped in target/var into DSM 7 persistent package data.
-syno_sync_var_folder ()
-{
-    if [ -d "${SYNOPKG_PKGDEST}/var" ] &&
-       [ "$(ls -A "${SYNOPKG_PKGDEST}/var" 2>/dev/null)" ]; then
-        echo "Install files from var folder"
-
-        echo "$RSYNC --ignore-existing --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}"
-        $RSYNC --ignore-existing --remove-source-files "${SYNOPKG_PKGDEST}/var/" "${SYNOPKG_PKGVAR}"
-
-        find "${SYNOPKG_PKGDEST}/var" -type f -exec sh -c 'x="$1"; mv "$x" "${x}.new"' sh {} \;
-
-        echo "$RSYNC --remove-source-files ${SYNOPKG_PKGDEST}/var/ ${SYNOPKG_PKGVAR}"
-        $RSYNC --remove-source-files "${SYNOPKG_PKGDEST}/var/" "${SYNOPKG_PKGVAR}"
-
-        $RM "${SYNOPKG_PKGDEST}/var"
-    fi
-}
-
 ### Generic package behaviors
 
 preinst ()
 {
     log_step "preinst"
-    call_func "validate_preinst"
-    call_func "service_preinst" install_log
 
     exit 0
 }
@@ -98,10 +72,6 @@ preinst ()
 postinst ()
 {
     log_step "postinst"
-    # copy target/var data to permanent storage
-    # and don't override old configurations
-    call_func "syno_sync_var_folder" install_log
-
     # Default settings files (never override existing ones)
     if [ ! -e "${SYNOPKG_PKGVAR}/torrserver.fuse" ]; then
         printf '0\n' > "${SYNOPKG_PKGVAR}/torrserver.fuse"
@@ -131,15 +101,12 @@ postinst ()
 preuninst ()
 {
     log_step "preuninst"
-    call_func "validate_preuninst"
-    call_func "service_preuninst" install_log
     exit 0
 }
 
 postuninst ()
 {
     log_step "postuninst"
-    call_func "service_postuninst" install_log
 
     if [ "$wizard_delete_data" = "true" ]; then
         echo "Removing files..." | install_log
@@ -162,25 +129,6 @@ postuninst ()
 preupgrade ()
 {
     log_step "preupgrade"
-    call_func "validate_preupgrade"
-
-    # dsm6 -> dsm7
-    if [ -d ${SYNOPKG_PKGDEST}/var ]; then
-        if [ ! -d ${SYNOPKG_PKGVAR} -o $(realpath ${SYNOPKG_PKGVAR}) = $(realpath ${SYNOPKG_PKGDEST}/var) ]; then
-            # Copy to temporary directory if upgrading from DSM6 -> DSM7
-            # Then restore once to permanent storage at postupgrade
-            if [ -d ${SYNOPKG_PKGDEST}/var -a "$(ls -A ${SYNOPKG_PKGDEST}/var 2>/dev/null)" ]; then
-                echo "Backup target/var folder used under DSM6" | install_log
-                echo "$RSYNC ${SYNOPKG_PKGDEST}/var/ ${TMP_DIR}" | install_log
-                $RSYNC ${SYNOPKG_PKGDEST}/var/ ${TMP_DIR} 2>&1 | install_log
-                # remove DSM6 target/var folder
-                rm -rf ${SYNOPKG_PKGDEST}/var 2>&1 | install_log
-            fi
-        fi
-    fi
-
-    call_func "service_preupgrade" install_log
-    call_func "service_save" install_log
     exit 0
 }
 
@@ -188,18 +136,9 @@ postupgrade ()
 {
     log_step "postupgrade"
 
-    call_func "service_restore" install_log
-
-    # dsm6 -> dsm7
-    if [ -d ${TMP_DIR} -a "$(ls -A ${TMP_DIR} 2>/dev/null)" ]; then
-        # Restore once to permanent storage at postupgrade
-        echo "Resore var folder from DSM6" | install_log
-        echo "$RSYNC ${TMP_DIR}/ ${SYNOPKG_PKGVAR}" | install_log
-        $RSYNC ${TMP_DIR}/ ${SYNOPKG_PKGVAR} 2>&1 | install_log
-    fi
-
-    # dsm7: Now sync in any new files to permanent storage
-    call_func "syno_sync_var_folder" install_log
+    # DSM runs postinst before postupgrade; service_postinst already migrated
+    # the configuration. This hook only repeats it (it is idempotent) so that
+    # the "reset settings" option of the upgrade wizard is always honoured.
     call_func "service_postupgrade" install_log
 
     exit 0
