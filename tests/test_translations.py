@@ -328,7 +328,6 @@ class TranslationQuality(unittest.TestCase):
         ("Choose the TorrServer directory with the Browse button", ["Browse"]),
         (h.NOT_WRITABLE, ["DSM permissions"]),
         (h.PERMISSIONS_OUTDATED, ["DSM permissions"]),
-        ("Restart is unavailable until DSM permissions are configured.", []),
     ]
 
     def test_messages_name_buttons_and_pages_exactly_as_the_ui_does(self):

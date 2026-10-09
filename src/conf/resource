@@ -2,7 +2,6 @@
     "port-config": {
         "protocol-file": "ui/TorrServer.sc"
     },
-    "systemd-unit": {},
     "usr-local-linker": {
         "bin": [
             "bin/TorrServer",

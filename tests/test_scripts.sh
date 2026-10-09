@@ -119,12 +119,12 @@ check "fresh install: only the expected files appear"       [ "$listing" = "conf
 echo "== service lifecycle: the real start-stop-status (run with bash, which is what DSM's sh is)"
 if [ -x /bin/python3 ] && command -v bash >/dev/null 2>&1; then
     S="$TMP/svc"; rm -rf "$S"; mkdir -p "$S/scripts" "$S/var" "$S/target/bin" "$S/target/helper" "$S/target/ui"
-    cp "${SCRIPTS}/start-stop-status" "${SCRIPTS}/service-setup" "$S/scripts/"
+    cp "${SCRIPTS}/start-stop-status" "${SCRIPTS}/service-setup" "${SCRIPTS}/restart-torrserver" "$S/scripts/"
     # Stand-ins: a "TorrServer" that records its arguments, and a helper that only waits.
     cat > "$S/target/bin/TorrServer" <<'FAKE'
 #!/bin/sh
 printf '%s\n' "$@" > "$FAKE_ARGS_FILE"
-exec sleep 300
+while true; do sleep 1; done
 FAKE
     printf 'import time\ntime.sleep(300)\n' > "$S/target/helper/helper.py"
     chmod +x "$S/target/bin/TorrServer"
@@ -186,6 +186,76 @@ FAKE
     check "a saved port is used on the next start"           sh -c "grep -A1 -x -- '-p' '$S/args.txt' | grep -qx 9999"
     check "...and appears in the firewall file"              grep -q 'dst.ports="9999/tcp"' "$S/target/ui/TorrServer.sc"
     ssc stop >/dev/null; sleep 1
+
+    echo "== restart-torrserver: no root, helper keeps running"
+    rst() { # rst <helper pid> [extra env...]
+        h="$1"; shift
+        env "$@" TORRSERVER_HELPER_PID="$h" FAKE_ARGS_FILE="$S/args.txt" SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 \
+            SYNOPKG_PKGDEST="$S/target" SYNOPKG_PKGVAR="$S/var" RESTART_STOP_TIMEOUT=3 sh "$S/scripts/restart-torrserver"
+    }
+    rm -f "$S/var/torrserver.port"
+    ssc start >/dev/null; sleep 1
+    set -- $(cat "$S/var/TorrServer.pid"); HELPER_PID="$1"; OLD_TS="$2"
+    echo 9100 > "$S/var/torrserver.port"
+    rst "$HELPER_PID"; rc=$?
+    set -- $(cat "$S/var/TorrServer.pid" 2>/dev/null); NEW_HELPER="$1"; NEW_TS="$2"
+    check "restart exits 0"                                  [ "$rc" -eq 0 ]
+    check "the old TorrServer is gone"                       gone "$OLD_TS"
+    check "a new TorrServer runs"                            alive "$NEW_TS"
+    check "...with a different pid"                          [ "$NEW_TS" != "$OLD_TS" ]
+    check "the helper was not touched"                       alive "$HELPER_PID"
+    check "pid file keeps the helper pid first"              [ "$NEW_HELPER" = "$HELPER_PID" ]
+    check "pid file lists exactly two processes"             [ "$(cat "$S/var/TorrServer.pid" | wc -w)" -eq 2 ]
+    sleep 1
+    check "the new settings are used (port 9100)"            sh -c "grep -A1 -x -- '-p' '$S/args.txt' | grep -qx 9100"
+    check "the restart lock is released"                     sh -c "[ ! -e '$S/var/restart.lock' ]"
+    ssc status >/dev/null; rc=$?
+    check "DSM still sees the package as running"            [ "$rc" -eq 0 ]
+
+    rst "$HELPER_PID"; rc=$?                                 # a second restart in a row
+    set -- $(cat "$S/var/TorrServer.pid"); SECOND_TS="$2"
+    check "a second restart works"                           sh -c "[ $rc -eq 0 ] && [ '$SECOND_TS' != '$NEW_TS' ]"
+    check "...and the previous one was stopped"              gone "$NEW_TS"
+
+    echo 999999 > "$S/var/TorrServer.pid"                    # stale pid file (TorrServer crashed)
+    rst "$HELPER_PID"; rc=$?
+    set -- $(cat "$S/var/TorrServer.pid" 2>/dev/null)
+    check "restart works with a stale pid file"              sh -c "[ $rc -eq 0 ] && [ '$1' = '$HELPER_PID' ] && kill -0 $2"
+    check "...and the stale TorrServer was stopped first"    gone "$SECOND_TS"
+
+    mkdir "$S/var/restart.lock"; echo "$HELPER_PID" > "$S/var/restart.lock/pid"     # a live owner
+    before="$(cat "$S/var/TorrServer.pid")"
+    rst "$HELPER_PID"; rc=$?
+    check "a restart in progress blocks a second one"        sh -c "[ $rc -eq 0 ] && [ \"\$(cat '$S/var/TorrServer.pid')\" = '$before' ]"
+    echo 999999 > "$S/var/restart.lock/pid"                  # a dead owner
+    rst "$HELPER_PID"; rc=$?
+    check "a stale lock does not block the restart"          sh -c "[ $rc -eq 0 ] && [ \"\$(cat '$S/var/TorrServer.pid')\" != '$before' ]"
+
+    rm -f "$S/var/TorrServer.pid"
+    env -u TORRSERVER_HELPER_PID SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 SYNOPKG_PKGDEST="$S/target" SYNOPKG_PKGVAR="$S/var" \
+        sh "$S/scripts/restart-torrserver"; rc=$?
+    check "without a helper pid it refuses (exit 1)"         [ "$rc" -eq 1 ]
+    check "...and the log says why"                          grep -q "helper pid is unknown" "$S/var/service.log"
+
+    for p in $(ps -eo pid=,args= | grep "$S/target/bin/TorrServer" | grep -v grep | awk '{print $1}'); do kill -9 "$p" 2>/dev/null; done
+    kill -9 "$HELPER_PID" 2>/dev/null; rm -f "$S/var/TorrServer.pid" "$S/var/torrserver.port"
+
+    echo "== restart-torrserver: a short DSM timeout does not cut the shutdown short"
+    cat > "$S/target/bin/TorrServer" <<'SLOW'
+#!/bin/sh
+# needs 3 seconds to shut down after SIGTERM
+trap 'sleep 3; exit 0' TERM
+while true; do sleep 1; done
+SLOW
+    ssc start >/dev/null; sleep 1
+    set -- $(cat "$S/var/TorrServer.pid"); H="$1"; SLOW_TS="$2"
+    : > "$S/var/service.log"
+    env SVC_WAIT_TIMEOUT=1 TORRSERVER_HELPER_PID="$H" FAKE_ARGS_FILE="$S/args.txt" SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 \
+        SYNOPKG_PKGDEST="$S/target" SYNOPKG_PKGVAR="$S/var" sh "$S/scripts/restart-torrserver"; rc=$?
+    check "restart succeeds although DSM says SVC_WAIT_TIMEOUT=1" [ "$rc" -eq 0 ]
+    check "...the slow TorrServer was stopped gracefully"        sh -c "! grep -q 'ignored SIGTERM' '$S/var/service.log'"
+    for p in $(ps -eo pid=,args= | grep "$S/target/bin/TorrServer" | grep -v grep | awk '{print $1}'); do kill -9 "$p" 2>/dev/null; done
+    kill -9 "$H" 2>/dev/null; rm -f "$S/var/TorrServer.pid"
 
     # A service that ignores SIGTERM must still be stopped (SIGKILL after the timeout).
     cat > "$S/target/bin/TorrServer" <<'STUBBORN'

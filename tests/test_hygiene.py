@@ -176,8 +176,7 @@ class RepositoryHygiene(unittest.TestCase):
 
     def test_every_script_the_package_ships_is_referenced(self):
         referenced = read("src", "conf", "resource") + read("src", "conf", "privilege") \
-            + "\n".join(open(f, encoding="utf-8").read() for f in SHELL_FILES) + HELPER_SOURCE \
-            + read("src", "conf", "systemd", "pkg-TorrServer-restart.service")
+            + "\n".join(open(f, encoding="utf-8").read() for f in SHELL_FILES) + HELPER_SOURCE
         for path in glob.glob(os.path.join(ROOT, "src", "scripts", "*")):
             name = os.path.basename(path)
             if name in DSM_ENTRY_POINTS | {"start-stop-status"}:

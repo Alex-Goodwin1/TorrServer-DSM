@@ -1,0 +1,132 @@
+#!/bin/sh
+#
+# Restarts only the TorrServer process. Runs as the package user (no root,
+# no sudo): the helper that started this script keeps running and keeps its pid.
+# Settings are read again from the package var directory, so a new port,
+# HTTPS or authentication setting takes effect.
+#
+# Environment: normally inherited from the helper (which DSM started with the
+# SYNOPKG_* variables); the defaults below cover a manual run.
+
+: "${SYNOPKG_PKGNAME:=TorrServer}"
+: "${SYNOPKG_DSM_VERSION_MAJOR:=7}"
+: "${SYNOPKG_PKGDEST:=/var/packages/${SYNOPKG_PKGNAME}/target}"
+: "${SYNOPKG_PKGVAR:=/var/packages/${SYNOPKG_PKGNAME}/var}"
+export SYNOPKG_PKGNAME SYNOPKG_DSM_VERSION_MAJOR SYNOPKG_PKGDEST SYNOPKG_PKGVAR
+
+# shellcheck disable=SC1091
+. "$(dirname "$0")/service-setup" || exit 1
+
+# How long TorrServer gets to shut down cleanly before it is killed. Not taken
+# from SVC_WAIT_TIMEOUT: DSM may pass a short value for its own stop handling.
+STOP_TIMEOUT="${RESTART_STOP_TIMEOUT:-20}"
+LOCK_DIR="${CONFIG_DIR}/restart.lock"
+
+log()
+{
+    printf '%s restart-torrserver: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "${LOG_FILE}"
+}
+
+# A killed process whose parent has not reaped it yet is a zombie.
+alive()
+{
+    kill -0 "$1" 2>/dev/null || return 1
+    ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null
+}
+
+# Pids of running TorrServer binaries of this package (found by their command
+# line, so a missing or stale pid file does not matter).
+torrserver_pids()
+{
+    for _cmdline in /proc/[0-9]*/cmdline; do
+        # The binary is the first word; for a script it is the second
+        # (after the interpreter).
+        _words="$(tr '\0' '\n' < "${_cmdline}" 2>/dev/null | head -n 2)"
+        case "
+${_words}
+" in
+            *"
+${SYNOPKG_PKGDEST}/bin/TorrServer
+"*)
+                _pid="${_cmdline#/proc/}"
+                echo "${_pid%/cmdline}"
+                ;;
+        esac
+    done
+}
+
+acquire_lock()
+{
+    if mkdir "${LOCK_DIR}" 2>/dev/null; then
+        echo "$$" > "${LOCK_DIR}/pid"
+        return 0
+    fi
+
+    _owner="$(cat "${LOCK_DIR}/pid" 2>/dev/null)"
+    if [ -n "${_owner}" ] && alive "${_owner}"; then
+        return 1
+    fi
+
+    # The previous restart died without cleaning up.
+    rm -rf "${LOCK_DIR}"
+    mkdir "${LOCK_DIR}" 2>/dev/null || return 1
+    echo "$$" > "${LOCK_DIR}/pid"
+}
+
+if ! acquire_lock; then
+    log "another restart is already running"
+    exit 0
+fi
+trap 'rm -rf "${LOCK_DIR}"' EXIT
+
+# The helper's own pid: given by the helper, otherwise first in the pid file.
+HELPER_PID="${TORRSERVER_HELPER_PID}"
+if [ -z "${HELPER_PID}" ]; then
+    set -- $(cat "${PID_FILE}" 2>/dev/null)
+    HELPER_PID="$1"
+fi
+case "${HELPER_PID}" in
+    ''|*[!0-9]*)
+        log "ERROR: the helper pid is unknown, is the package running?"
+        exit 1
+        ;;
+esac
+
+log "stopping TorrServer"
+OLD_PIDS="$(torrserver_pids)"
+for pid in ${OLD_PIDS}; do
+    kill -TERM "${pid}" 2>/dev/null
+done
+
+waited=0
+for pid in ${OLD_PIDS}; do
+    while alive "${pid}" && [ "${waited}" -lt "${STOP_TIMEOUT}" ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if alive "${pid}"; then
+        log "TorrServer ${pid} ignored SIGTERM, sending SIGKILL"
+        kill -KILL "${pid}" 2>/dev/null
+        sleep 1
+    fi
+done
+
+service_prestart >> "${LOG_FILE}" 2>&1
+
+log "starting TorrServer"
+# The command line is split into words on purpose.
+# shellcheck disable=SC2086
+${TORRSERVER_COMMAND} < /dev/null >> "${LOG_FILE}" 2>&1 &
+NEW_PID=$!
+
+# Replace the pid file in one step: DSM reads it to see whether the package runs.
+printf '%s %s' "${HELPER_PID}" "${NEW_PID}" > "${PID_FILE}.new" && mv -f "${PID_FILE}.new" "${PID_FILE}"
+
+sleep 1
+if ! alive "${NEW_PID}"; then
+    log "ERROR: TorrServer exited right after the start, see TorrServer.log"
+    exit 1
+fi
+
+log "TorrServer restarted (pid ${NEW_PID})"
+exit 0

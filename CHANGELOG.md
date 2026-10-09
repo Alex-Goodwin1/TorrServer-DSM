@@ -3,6 +3,65 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.5.145.2 (2026-10-08)
+
+TorrServer itself is unchanged (`MatriX.145.2`).
+
+### Changed
+
+- **Settings are reorganized.** Authentication now comes before HTTPS and SSL.
+  The DSM permission instructions moved into the SSL Certificate card instead
+  of a separate window, and the media server recommendations window is gone:
+  ticking **FUSE** shows a short inline hint for Plex and Emby.
+- The TorrServer folder help now explains that the folder is optional and that
+  the disk cache is switched on in the TorrServer web interface.
+- When TorrServer is stopped, the status page shows the last lines of its log
+  and a **Start** button.
+- **Restart from the Helper no longer needs root.** The Restart button is
+  always available. It stops and starts only the TorrServer process (the
+  Helper keeps running) and reads the saved settings again, so a new port,
+  HTTPS or password takes effect. TorrServer gets time to shut down cleanly
+  before it is killed.
+- While TorrServer restarts, the status page shows **Restarting** and updates
+  itself when TorrServer is back.
+- The TorrServer folder is optional: the port, password and HTTPS can be saved
+  without choosing one. Only FUSE still needs a folder.
+- The package no longer ships the root restart service
+  (`pkg-TorrServer-restart.service`) or the `restart-package` script, and the
+  optional sudo rule no longer lists it. An existing rule keeps working; run
+  `setup-permissions` again to drop the old entry.
+- The optional permission is now needed only for DSM / manual certificates and
+  for folders the service user cannot write to; the texts in all five languages
+  say so.
+- The service log no longer repeats sudo's "a password is required" line when
+  the optional permission is not configured.
+
+## 2.4.145.2 (2026-10-08)
+
+TorrServer itself is unchanged (`MatriX.145.2`).
+
+### Changed
+
+- **Restart from the Helper no longer needs root.** The Restart button is
+  always available. It stops and starts only the TorrServer process (the
+  Helper keeps running) and reads the saved settings again, so a new port,
+  HTTPS or password takes effect. Concurrent restarts are serialized and a
+  stale pid file is handled.
+- The package no longer ships the root restart service
+  (`pkg-TorrServer-restart.service`) or the `restart-package` script, and the
+  optional sudo rule no longer lists it. An existing rule keeps working; run
+  `setup-permissions` again to drop the old entry.
+- The optional permission is now needed only for DSM / manual certificates and
+  for folders the service user cannot write to; the texts in all five languages
+  say so.
+- While TorrServer restarts, the status page shows **Restarting** and updates
+  itself when TorrServer is back (before, it jumped to a stale page and the new
+  port only appeared after switching tabs).
+- The TorrServer folder is optional: the port, password and HTTPS can be saved
+  without choosing one. Only FUSE still needs a folder.
+- The service log no longer repeats sudo's "a password is required" line when
+  the optional permission is not configured.
+
 ## 2.3.145.2 (2026-10-07)
 
 TorrServer itself is unchanged (`MatriX.145.2`).
