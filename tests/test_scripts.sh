@@ -83,7 +83,12 @@ dsm_steps() {     # dsm_steps [reset] <step>...    (DSM calls postinst first, th
 }
 EXPECTED="$(sh -c ". '${SCRIPTS}/service-setup' 2>/dev/null; echo \$CONFIG_SCHEMA" 2>/dev/null || true)"
 
-dsm_prepare; dsm_old_state self; dsm_steps postinst postupgrade
+dsm_prepare; dsm_old_state self
+echo "old service output" > "$VAR/service.log"; echo "old cert log" > "$VAR/Helper.log"; echo "older" > "$VAR/Helper.log.1"
+echo "TorrServer history" > "$VAR/TorrServer.log"
+dsm_steps postinst postupgrade
+check "upgrade: the separate service.log / Helper.log are removed" sh -c "[ ! -e '$VAR/service.log' ] && [ ! -e '$VAR/Helper.log' ] && [ ! -e '$VAR/Helper.log.1' ]"
+check "upgrade: TorrServer.log and its history are kept"    sh -c "[ \"\$(cat '$VAR/TorrServer.log')\" = 'TorrServer history' ]"
 check "upgrade: obsolete torrserver.fuse.path removed"      hasnt torrserver.fuse.path
 check "upgrade: obsolete cache.path removed"                hasnt cache.path
 check "upgrade: stale DSM certificate removed (self mode)"  sh -c "[ ! -e '$VAR/server.pem' ] && [ ! -e '$VAR/server.key' ]"
@@ -114,7 +119,8 @@ dsm_prepare; dsm_steps postinst            # fresh install: empty var, postinst 
 check "fresh install: schema recorded"                      [ "$(cat "$VAR/config.schema")" = "$SCHEMA" ]
 check "fresh install: default files created"                sh -c "[ -e '$VAR/torrserver.fuse' ] && [ -e '$VAR/torrserver.dir' ]"
 listing="$(LC_ALL=C ls "$VAR" | tr '\n' ' ')"
-check "fresh install: only the expected files appear"       [ "$listing" = "config.schema service.log torrserver.dir torrserver.fuse " ]
+check "fresh install: the installer does not create the shared log (root would own it)" hasnt TorrServer.log
+check "fresh install: only the expected files appear"       [ "$listing" = "config.schema torrserver.dir torrserver.fuse " ]
 
 echo "== service lifecycle: the real start-stop-status (run with bash, which is what DSM's sh is)"
 if [ -x /bin/python3 ] && command -v bash >/dev/null 2>&1; then
@@ -145,8 +151,10 @@ FAKE
     ssc status >/dev/null; rc=$?
     check "not started yet: status exits 3"                  [ "$rc" -eq 3 ]
 
+    echo "history from the previous run" > "$S/var/TorrServer.log"
     ssc start; rc=$?
     check "start exits 0"                                    [ "$rc" -eq 0 ]
+    check "...and does not wipe the earlier log"             grep -q "history from the previous run" "$S/var/TorrServer.log"
     PIDS="$(cat "$S/var/TorrServer.pid" 2>/dev/null)"
     set -- $PIDS; HELPER_PID="$1"; TS_PID="$2"
     check "pid file lists exactly two processes"             [ "$#" -eq 2 ]
@@ -155,7 +163,8 @@ FAKE
     check "TorrServer got -d <var directory>"                grep -qx -- "$S/var" "$S/args.txt"
     check "TorrServer got the default port 8090"             sh -c "grep -A1 -x -- '-p' '$S/args.txt' | grep -qx 8090"
     check "TorrServer got its own log file (-l)"             sh -c "grep -A1 -x -- '-l' '$S/args.txt' | grep -qx '$S/var/TorrServer.log'"
-    check "the service log gets a start header"              grep -q "Starting TorrServer" "$S/var/service.log"
+    check "the one log gets a start line in TorrServer's format" grep -Eq "^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]{8} UTC0 service: Starting TorrServer" "$S/var/TorrServer.log"
+    check "no separate service.log is written"              sh -c "[ ! -e '$S/var/service.log' ]"
     check "service_prestart ran: firewall file written"      grep -q 'dst.ports="8090/tcp"' "$S/target/ui/TorrServer.sc"
 
     out="$(ssc status)"; rc=$?
@@ -165,7 +174,7 @@ FAKE
     ssc start; rc=$?
     check "a second start is harmless (exit 0)"              [ "$rc" -eq 0 ]
     check "...and does not change the pids"                  [ "$(cat "$S/var/TorrServer.pid")" = "$PIDS" ]
-    check "...it only says that it is already running"       grep -q "already running" "$S/var/service.log"
+    check "...it only says that it is already running"       grep -q "already running" "$S/var/TorrServer.log"
 
     ssc stop; rc=$?
     check "stop exits 0"                                     [ "$rc" -eq 0 ]
@@ -180,6 +189,38 @@ FAKE
     ssc status >/dev/null; rc=$?
     check "a stale pid file means not running (exit 3)"      [ "$rc" -eq 3 ]
     check "...and the stale file is removed"                 sh -c "[ ! -e '$S/var/TorrServer.pid' ]"
+
+    # TorrServer stopped on its own (its web page, a crash): the package still
+    # counts as running while the helper is alive, so DSM keeps the desktop icon.
+    ssc start >/dev/null; sleep 1
+    set -- $(cat "$S/var/TorrServer.pid"); HELPER_PID="$1"; TS_PID="$2"
+    kill -TERM "$TS_PID"; gone "$TS_PID"
+    ssc status >/dev/null; rc=$?
+    check "TorrServer gone, helper alive: status stays 0 (icon stays)" [ "$rc" -eq 0 ]
+    check "...the pid file still holds the helper"           sh -c "grep -q '^$HELPER_PID' '$S/var/TorrServer.pid'"
+    ssc start; rc=$?
+    set -- $(cat "$S/var/TorrServer.pid" 2>/dev/null)
+    check "start next to a living helper exits 0"            [ "$rc" -eq 0 ]
+    check "...brings TorrServer back"                        alive "$2"
+    check "...without touching the helper"                   [ "$1" = "$HELPER_PID" ] && alive "$HELPER_PID"
+    kill -TERM "$2"; gone "$2"
+    ssc stop; rc=$?
+    check "stop with only the helper alive exits 0"          [ "$rc" -eq 0 ]
+    check "...and stops the helper"                          gone "$HELPER_PID"
+    ssc status >/dev/null; rc=$?
+    check "helper gone: status exits 3"                      [ "$rc" -eq 3 ]
+
+    # Stopping also removes a FUSE mount that TorrServer did not release.
+    printf '#!/bin/sh\necho "$*" >> "$FAKE_UMOUNT_LOG"\n' > "$S/fake-fusermount"; chmod +x "$S/fake-fusermount"
+    echo "torrserver-fuse /volume1/left/FUSE fuse.torrserver rw 0 0" > "$S/mounts"
+    : > "$S/umount.log"
+    export MOUNTS_FILE="$S/mounts" FUSERMOUNT_CMD="$S/fake-fusermount" FAKE_UMOUNT_LOG="$S/umount.log"
+    ssc start >/dev/null; sleep 1
+    check "start unmounts a leftover FUSE mount first"       grep -qx -- "-u -z -- /volume1/left/FUSE" "$S/umount.log"
+    : > "$S/umount.log"
+    ssc stop >/dev/null; sleep 1
+    check "stop removes a leftover FUSE mount as well"       grep -qx -- "-u -z -- /volume1/left/FUSE" "$S/umount.log"
+    unset MOUNTS_FILE FUSERMOUNT_CMD FAKE_UMOUNT_LOG
 
     echo 9999 > "$S/var/torrserver.port"
     ssc start >/dev/null; sleep 1
@@ -235,7 +276,7 @@ FAKE
     env -u TORRSERVER_HELPER_PID SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 SYNOPKG_PKGDEST="$S/target" SYNOPKG_PKGVAR="$S/var" \
         sh "$S/scripts/restart-torrserver"; rc=$?
     check "without a helper pid it refuses (exit 1)"         [ "$rc" -eq 1 ]
-    check "...and the log says why"                          grep -q "helper pid is unknown" "$S/var/service.log"
+    check "...and the log says why"                          grep -q "helper pid is unknown" "$S/var/TorrServer.log"
 
     for p in $(ps -eo pid=,args= | grep "$S/target/bin/TorrServer" | grep -v grep | awk '{print $1}'); do kill -9 "$p" 2>/dev/null; done
     kill -9 "$HELPER_PID" 2>/dev/null; rm -f "$S/var/TorrServer.pid" "$S/var/torrserver.port"
@@ -249,11 +290,11 @@ while true; do sleep 1; done
 SLOW
     ssc start >/dev/null; sleep 1
     set -- $(cat "$S/var/TorrServer.pid"); H="$1"; SLOW_TS="$2"
-    : > "$S/var/service.log"
+    : > "$S/var/TorrServer.log"
     env SVC_WAIT_TIMEOUT=1 TORRSERVER_HELPER_PID="$H" FAKE_ARGS_FILE="$S/args.txt" SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 \
         SYNOPKG_PKGDEST="$S/target" SYNOPKG_PKGVAR="$S/var" sh "$S/scripts/restart-torrserver"; rc=$?
     check "restart succeeds although DSM says SVC_WAIT_TIMEOUT=1" [ "$rc" -eq 0 ]
-    check "...the slow TorrServer was stopped gracefully"        sh -c "! grep -q 'ignored SIGTERM' '$S/var/service.log'"
+    check "...the slow TorrServer was stopped gracefully"        sh -c "! grep -q 'ignored SIGTERM' '$S/var/TorrServer.log'"
     for p in $(ps -eo pid=,args= | grep "$S/target/bin/TorrServer" | grep -v grep | awk '{print $1}'); do kill -9 "$p" 2>/dev/null; done
     kill -9 "$H" 2>/dev/null; rm -f "$S/var/TorrServer.pid"
 
@@ -272,7 +313,7 @@ STUBBORN
     check "stop exits 0 even when SIGTERM is ignored"        [ "$rc" -eq 0 ]
     check "...the service was killed"                        gone "$STUBBORN_PID"
     check "...and the pid file is gone"                      sh -c "[ ! -e '$S/var/TorrServer.pid' ]"
-    check "...the log says a KILL was needed"                sh -c "grep -q 'Stopping TorrServer service' '$S/var/service.log'"
+    check "...the log says a KILL was needed"                sh -c "grep -q 'Stopping TorrServer service' '$S/var/TorrServer.log'"
 
     ssc bogus >/dev/null 2>&1; rc=$?
     check "an unknown action exits 1"                        [ "$rc" -eq 1 ]
@@ -291,7 +332,69 @@ echo "== service-setup: command line"
 setup_var self; echo 1 > "$VAR/torrserver.auth"; echo '{"u":"p"}' > "$VAR/accs.db"
 out="$(run_setup 'echo "$SERVICE_COMMAND"')"
 check "auth flag passed"                    sh -c "echo '$out' | grep -q ' -a '"
-check "service log != torrserver log"       run_setup '[ "$LOG_FILE" != "$TORRSERVER_LOG" ]'
+check "one log for everything"              run_setup '[ "$LOG_FILE" = "$TORRSERVER_LOG" ] && [ "${LOG_FILE##*/}" = TorrServer.log ]'
+
+echo "== service-setup: which Python runs the Helper"
+setup_var self; mkdir -p "$TMP/py/Python3.9/target/usr/bin"
+printf '#!/bin/sh\n' > "$TMP/py/system-python3"; chmod +x "$TMP/py/system-python3"
+cp "$TMP/py/system-python3" "$TMP/py/Python3.9/target/usr/bin/python3"
+out="$(PYTHON_CANDIDATES="$TMP/py/none $TMP/py/system-python3 $TMP/py/Python3.9/target/usr/bin/python3" run_setup 'echo "$HELPER_COMMAND"')"
+check "the system Python is used when it exists"        sh -c "echo '$out' | grep -q '^$TMP/py/system-python3 '"
+out="$(PYTHON_CANDIDATES="$TMP/py/none $TMP/py/Python3*/target/usr/bin/python3" run_setup 'echo "$HELPER_COMMAND"')"
+check "...else the Python 3 package from Package Center" sh -c "echo '$out' | grep -q '^$TMP/py/Python3.9/target/usr/bin/python3 '"
+out="$(PYTHON_CANDIDATES="$TMP/py/none" run_setup 'echo "$HELPER_COMMAND"')"
+check "...and with none the old path stays (the log says why)" sh -c "echo '$out' | grep -q '^/bin/python3 '"
+PYTHON_CANDIDATES="$TMP/py/none" run_setup 'service_prestart' >/dev/null 2>&1
+check "...no Python: the log tells to install Python 3"  grep -q "Python 3 was not found" "$VAR/TorrServer.log"
+
+echo "== a FUSE mount left behind is removed before TorrServer starts"
+setup_var self; rm -f "$VAR/TorrServer.log"
+cat > "$TMP/fake-fusermount" <<'FAKE'
+#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_UMOUNT_LOG"
+case "$*" in *broken*) exit 1 ;; esac
+exit 0
+FAKE
+chmod +x "$TMP/fake-fusermount"
+cat > "$TMP/mounts" <<'MOUNTS'
+fusectl /sys/fs/fuse/connections fusectl rw,nosuid,nodev,noexec,relatime 0 0
+torrserver-fuse /volume1/docker/PlexTorr/FUSE fuse.torrserver rw,nosuid,nodev,relatime,user_id=179006,group_id=179006,allow_other 0 0
+torrserver-fuse /volume1/my\040films/FUSE fuse.torrserver rw,nosuid,nodev,relatime,user_id=179006,group_id=179006,allow_other 0 0
+torrserver-fuse /volume1/broken/FUSE fuse.torrserver rw,nosuid,nodev,relatime,user_id=179006,group_id=179006,allow_other 0 0
+other /volume1/other fuse.sshfs rw 0 0
+MOUNTS
+: > "$TMP/umount.log"
+MOUNTS_FILE="$TMP/mounts" FUSERMOUNT_CMD="$TMP/fake-fusermount" FAKE_UMOUNT_LOG="$TMP/umount.log" \
+    run_setup 'cleanup_stale_fuse_mounts' >/dev/null 2>&1
+check "every leftover fuse.torrserver mount is unmounted (lazily)" grep -qx -- "-u -z -- /volume1/docker/PlexTorr/FUSE" "$TMP/umount.log"
+check "...a path with a space is decoded"                          grep -qx -- "-u -z -- /volume1/my films/FUSE" "$TMP/umount.log"
+check "...other mounts are not touched"                            sh -c "! grep -q -e fusectl -e sshfs -e /volume1/other '$TMP/umount.log'"
+check "...it is written to the log"                                grep -q "Unmounted a leftover FUSE mount at /volume1/docker/PlexTorr/FUSE" "$VAR/TorrServer.log"
+check "...one that cannot be unmounted says how to do it by hand"  grep -q "umount -l '/volume1/broken/FUSE'" "$VAR/TorrServer.log"
+
+# A running TorrServer owns its mount: nothing is unmounted then.
+mkdir -p "$TMP/target/bin"
+printf '#!/bin/sh\nwhile true; do sleep 1; done\n' > "$TMP/target/bin/TorrServer"; chmod +x "$TMP/target/bin/TorrServer"
+"$TMP/target/bin/TorrServer" & RUNNING=$!
+sleep 1; : > "$TMP/umount.log"
+MOUNTS_FILE="$TMP/mounts" FUSERMOUNT_CMD="$TMP/fake-fusermount" FAKE_UMOUNT_LOG="$TMP/umount.log" \
+    run_setup 'cleanup_stale_fuse_mounts' >/dev/null 2>&1
+kill "$RUNNING" 2>/dev/null; wait "$RUNNING" 2>/dev/null
+check "a running TorrServer: nothing is unmounted"                 sh -c "[ ! -s '$TMP/umount.log' ]"
+rm -rf "$TMP/target/bin"
+
+echo "== preinst: the install stops with a message when there is no Python 3"
+pre() { # pre <PYTHON_CANDIDATES> : run the real preinst the way DSM does
+    PD="$TMP/pre"; rm -rf "$PD"; mkdir -p "$PD/var" "$PD/target"
+    ( cd "$PD" && env PYTHON_CANDIDATES="$1" SYNOPKG_PKGNAME=TorrServer SYNOPKG_DSM_VERSION_MAJOR=7 \
+        SYNOPKG_PKGVAR="$PD/var" SYNOPKG_PKGDEST="$PD/target" SYNOPKG_TEMP_LOGFILE="$PD/log.txt" \
+        sh "${SCRIPTS}/preinst" >/dev/null 2>&1 )
+}
+pre "$TMP/py/system-python3"; rc=$?
+check "with Python 3 the install goes on (exit 0)"      [ "$rc" -eq 0 ]
+pre "$TMP/py/none"; rc=$?
+check "without it the install fails (exit 1)"           [ "$rc" -eq 1 ]
+check "...and the dialog text says what to install"    grep -q "Install the Python 3 package from DSM Package Center" "$TMP/pre/log.txt"
 
 echo "== service-setup: FUSE path with spaces is skipped"
 setup_var self; mkdir -p "$TMP/My Data/FUSE"; echo 1 > "$VAR/torrserver.fuse"; echo "$TMP/My Data" > "$VAR/torrserver.dir"
@@ -304,6 +407,20 @@ setup_var self; echo 1 > "$VAR/torrserver.https"; echo 9443 > "$VAR/torrserver.h
 run_setup update_firewall_port >/dev/null 2>&1
 check "web + https ports listed"            grep -q 'dst.ports="9999,9443/tcp"' "$TMP/target/ui/TorrServer.sc"
 check "helper port NOT exposed"             sh -c "! grep -q 42777 '$TMP/target/ui/TorrServer.sc'"
+
+echo "== certificate-helper: logging into the shared log (it runs as root)"
+CH="$TMP/ch"; rm -rf "$CH"; mkdir -p "$CH"
+chlog() { # chlog <log file> : run the real log_message() against that file
+    fn="$(sed -n '/^log_message()/,/^}/p' "${SCRIPTS}/certificate-helper")"
+    LOGF="$1" FN="$fn" sh -c 'LOG_FILE="$LOGF"; eval "$FN"; log_message hello'
+}
+check "certificate-helper uses TorrServer.log"            grep -q '^LOG_FILE="${CONFIG_DIR}/TorrServer.log"' "${SCRIPTS}/certificate-helper"
+: > "$CH/TorrServer.log"; chlog "$CH/TorrServer.log"
+check "...appends in TorrServer's format to an existing log" grep -Eq "^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]{8} UTC0 certificate-helper: hello$" "$CH/TorrServer.log"
+chlog "$CH/missing.log"
+check "...never creates the log (root would own it)"       sh -c "[ ! -e '$CH/missing.log' ]"
+echo keep > "$CH/target.txt"; ln -s "$CH/target.txt" "$CH/link.log"; chlog "$CH/link.log"
+check "...never follows a symbolic link"                   sh -c "[ \"\$(cat '$CH/target.txt')\" = keep ]"
 
 echo "== certificate-helper: path resolution"
 mkdir -p "$TMP/syno/sub" "$TMP/volume1/share"

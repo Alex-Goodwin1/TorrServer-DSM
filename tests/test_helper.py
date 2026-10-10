@@ -264,6 +264,7 @@ class SaveSettingsTests(Base):
     def test_dsm_and_manual_certificates_need_the_optional_permissions(self):
         h.has_privileged_access = lambda use_cache=True: False
         h.get_dsm_certificates = lambda: [{"cert": "/usr/syno/c.pem", "key": "/usr/syno/k.pem", "label": "x"}]
+        open(h.SSL_MODE_FILE, "w").write("manual")  # an installation that already uses own paths
         for mode, cert, key in (("dsm", "/usr/syno/c.pem", "/usr/syno/k.pem"),
                                 ("manual", "/volume1/c.pem", "/volume1/k.pem")):
             ok, message = self.save(ssl_mode=mode, ssl_cert=cert, ssl_key=key)
@@ -273,8 +274,63 @@ class SaveSettingsTests(Base):
 
     def test_certificates_work_once_permissions_exist(self):
         h.has_privileged_access = lambda use_cache=True: True
+        open(h.SSL_MODE_FILE, "w").write("manual")
         ok, message = self.save(ssl_mode="manual", ssl_cert="/volume1/c.pem", ssl_key="/volume1/k.pem")
         self.assertTrue(ok, message)
+
+    def test_own_paths_cannot_be_chosen_any_more_but_an_existing_setup_keeps_working(self):
+        # own certificates are set on TorrServer's page now
+        ok, message = self.save(ssl_mode="manual", ssl_cert="/volume1/c.pem", ssl_key="/volume1/k.pem")
+        self.assertEqual((ok, message), (False, "Invalid certificate mode"))
+        self.assertNotIn('value="manual"', h.settings_page())
+        open(h.SSL_MODE_FILE, "w").write("manual")
+        self.assertIn('<option value="manual" selected', h.settings_page())
+
+    def test_back_to_the_self_signed_certificate_removes_the_copied_pair(self):
+        for path in h.SERVER_CERT_FILES:
+            open(path, "w").write("copied from DSM")
+        open(h.SSL_MODE_FILE, "w").write("dsm")
+        ok, message = self.save(ssl_mode="self")
+        self.assertTrue(ok, message)
+        for path in h.SERVER_CERT_FILES:
+            self.assertFalse(os.path.exists(path), path)
+
+    def test_saving_self_signed_again_leaves_torrservers_own_pair_alone(self):
+        for path in h.SERVER_CERT_FILES:
+            open(path, "w").write("made by TorrServer")
+        open(h.SSL_MODE_FILE, "w").write("self")
+        ok, message = self.save(ssl_mode="self")
+        self.assertTrue(ok, message)
+        for path in h.SERVER_CERT_FILES:
+            self.assertTrue(os.path.exists(path), path)
+
+    def test_certificate_uploaded_in_torrservers_page_is_announced(self):
+        self.assertNotIn(h.UPLOADED_CERT_NOTICE, h.settings_page())
+        os.makedirs(os.path.dirname(h.UPLOADED_CERT_FILE), exist_ok=True)
+        open(h.UPLOADED_CERT_FILE, "w").write("x")
+        page = h.settings_page()
+        self.assertIn(h.UPLOADED_CERT_NOTICE, page)
+        self.assertNotIn(h.UPLOADED_CERT_FILE, page)
+
+    def test_certificate_source_is_locked_while_torrservers_upload_is_in_use(self):
+        open(h.SSL_MODE_FILE, "w").write("dsm")
+        open(h.SSL_CERT_FILE, "w").write("/usr/syno/c.pem")
+        open(h.SSL_KEY_FILE, "w").write("/usr/syno/k.pem")
+        os.makedirs(os.path.dirname(h.UPLOADED_CERT_FILE), exist_ok=True)
+        open(h.UPLOADED_CERT_FILE, "w").write("x")
+        for path in h.SERVER_CERT_FILES:
+            open(path, "w").write("copied from DSM")
+        self.assertIn('<fieldset class="cert-fields" disabled>', h.settings_page())
+        # a disabled form control is not sent, so the save sees the default "self"
+        ok, message = self.save(ssl_mode="self", ssl_cert="", ssl_key="")
+        self.assertTrue(ok, message)
+        self.assertEqual(h.get_ssl_mode(), "dsm", "the saved source must not change")
+        self.assertEqual(open(h.SSL_CERT_FILE).read(), "/usr/syno/c.pem")
+        for path in h.SERVER_CERT_FILES:
+            self.assertTrue(os.path.exists(path), "nothing is deleted while the upload is in use")
+
+    def test_source_can_be_chosen_again_after_the_upload_is_gone(self):
+        self.assertIn('<fieldset class="cert-fields" >', h.settings_page())
 
     def test_a_directory_the_service_user_cannot_write_is_explained(self):
         h.has_privileged_access = lambda use_cache=True: False
@@ -529,12 +585,12 @@ class FormTests(Base):
 
     def test_root_only_choices_are_locked_without_permissions(self):
         page = self.render(privileged=False)
-        for pattern in (r'<option value="dsm"[^>]*>', r'<option value="manual"[^>]*>'):
+        for pattern in (r'<option value="dsm"[^>]*>',):
             self.assertIn("disabled", self.tag(page, pattern), pattern)
 
     def test_everything_is_available_with_permissions(self):
         page = self.render(privileged=True)
-        for pattern in (r'<option value="dsm"[^>]*>', r'<option value="manual"[^>]*>',
+        for pattern in (r'<option value="dsm"[^>]*>',
                         r'<button[^>]*formaction="./restart"[^>]*>', r"<fieldset[^>]*>"):
             self.assertNotIn("disabled", self.tag(page, pattern), pattern)
 
@@ -573,7 +629,7 @@ class SettingsLayoutTests(FormTests):
     """Order of the cards and the inline FUSE / disk cache help."""
 
     def titles(self, page):
-        return re.findall(r'<div class="settings-card-title">\s*<span class="metric-icon">[^<]*</span>\s*<span>([^<]*)</span>', page)
+        return re.findall(r'<div class="settings-card-title">\s*<span class="metric-icon">.*?</span>\s*<span>([^<]*)</span>', page, re.S)
 
     def test_authentication_comes_before_the_certificate_and_the_buttons_come_last(self):
         page = self.render(privileged=False)
@@ -602,15 +658,13 @@ class SettingsLayoutTests(FormTests):
 class StoppedStatusTests(Base):
     def setUp(self):
         super().setUp()
-        self.saved = (h.is_torrserver_running, h.TORRSERVER_LOG, h.SERVICE_LOG, dict(h.RESTART_STATE))
+        self.saved = (h.is_torrserver_running, h.TORRSERVER_LOG, dict(h.RESTART_STATE))
         h.is_torrserver_running = lambda: False
         h.TORRSERVER_LOG = os.path.join(VAR, "TorrServer.log")
-        h.SERVICE_LOG = os.path.join(VAR, "service.log")
         h.RESTART_STATE["started"] = None
         self.addCleanup(lambda: (setattr(h, "is_torrserver_running", self.saved[0]),
                                  setattr(h, "TORRSERVER_LOG", self.saved[1]),
-                                 setattr(h, "SERVICE_LOG", self.saved[2]),
-                                 h.RESTART_STATE.update(self.saved[3])))
+                                 h.RESTART_STATE.update(self.saved[2])))
 
     def write(self, path, text, age=0):
         with open(path, "w", encoding="utf-8") as f:
@@ -627,21 +681,23 @@ class StoppedStatusTests(Base):
         page = h.main_page("nas.local")
         self.assertIn("TorrServer is not running.", page)
         self.assertNotIn("TorrServer is running normally.", page)
-        self.assertRegex(page, r'<form method="post" action="./restart"><button type="submit">Start</button>')
+        self.assertEqual(page.count(">Start<"), 1)
+        # on the right of the status card, where the Open buttons are while it runs
+        self.assertRegex(page, r'<div class="web-ui-actions start-actions">\s*<div class="web-ui-action"><form method="post" action="./restart"><button type="submit">Start</button>')
+        self.assertNotIn("Open HTTP", page)
 
-    def test_the_last_lines_of_the_newest_log_are_shown(self):
-        self.write(h.TORRSERVER_LOG, "old one\nold two\n", age=100)
-        self.write(h.SERVICE_LOG, "a\nb\n\nlisten tcp :8090: bind: address already in use\nexit status 1\n")
+    def test_the_last_lines_of_the_log_are_shown(self):
+        self.write(h.TORRSERVER_LOG, "old one\nold two\na\nb\n\nlisten tcp :8090: bind: address already in use\nexit status 1\n")
         lines = h.last_problem_lines()
         self.assertEqual(lines[-2:], ["listen tcp :8090: bind: address already in use", "exit status 1"])
         self.assertEqual(len(lines), 3)
-        self.assertNotIn("old one", "".join(lines))
+        self.assertNotIn("old two", "".join(lines))
         page = h.main_page("nas.local")
         self.assertIn("address already in use", page)
         self.assertIn("Last lines of the log:", page)
 
     def test_log_text_is_escaped_and_cut(self):
-        self.write(h.SERVICE_LOG, "<script>alert(1)</script>" + "x" * 500 + "\n")
+        self.write(h.TORRSERVER_LOG, "<script>alert(1)</script>" + "x" * 500 + "\n")
         self.assertTrue(all(len(line) <= 220 for line in h.last_problem_lines()))
         page = h.main_page("nas.local")
         self.assertNotIn("<script>alert(1)", page)
@@ -650,6 +706,12 @@ class StoppedStatusTests(Base):
     def test_no_logs_means_no_log_block(self):
         self.assertEqual(h.last_problem_lines(), [])
         self.assertNotIn("Last lines of the log:", h.main_page("nas.local"))
+
+    def test_start_button_is_not_part_of_the_log_block(self):
+        self.write(h.TORRSERVER_LOG, "boom\n")
+        block = h.stopped_info_html()
+        self.assertIn("boom", block)
+        self.assertNotIn("Start", block)
 
     def test_while_restarting_there_is_no_start_button(self):
         h.RESTART_STATE["started"] = time.monotonic()
@@ -722,6 +784,15 @@ class RestartProgressTests(Base):
         self.assertNotIn("status-restarting", page.split("</style>")[1])
         self.assertNotIn("./restart-status", page)
 
+    def test_status_page_notices_a_stop_or_start_by_itself(self):
+        h.RESTART_STATE["started"] = None
+        h.is_torrserver_running = lambda: False
+        page = h.main_page("nas.local")
+        self.assertIn("./server-state", page)
+        self.assertIn("var shown = 'stopped';", page)
+        h.is_torrserver_running = lambda: True
+        self.assertIn("var shown = 'running';", h.main_page("nas.local"))
+
 
 class RestartTests(unittest.TestCase):
     """The restart needs neither root nor sudo."""
@@ -764,21 +835,45 @@ class RestartTests(unittest.TestCase):
 
 
 class LogRotationTests(Base):
-    def test_both_logs_rotated(self):
+    def small_limit(self):
         old = h.LOG_MAX_SIZE
         h.LOG_MAX_SIZE = 100
         self.addCleanup(lambda: setattr(h, "LOG_MAX_SIZE", old))
-        for path in h.ROTATED_LOGS:
-            with open(path, "w") as f:
-                f.write("x" * 500)
+
+    def test_the_log_is_rotated(self):
+        self.small_limit()
+        with open(h.TORRSERVER_LOG, "w") as f:
+            f.write("x" * 500)
         h.rotate_log_if_needed()
-        for path in h.ROTATED_LOGS:
-            self.assertEqual(os.path.getsize(path), 0)
-            self.assertTrue(os.path.exists(path + ".1"))
+        self.assertEqual(os.path.getsize(h.TORRSERVER_LOG), 0)
+        self.assertTrue(os.path.exists(h.TORRSERVER_LOG + ".1"))
+
+    def test_writers_that_append_leave_no_hole_after_rotation(self):
+        # TorrServer, the scripts and certificate-helper all append (O_APPEND)
+        # to the same file; after copy + truncate the next line must start at 0.
+        self.small_limit()
+        with open(h.TORRSERVER_LOG, "ab") as writer:
+            writer.write(b"x" * 500 + b"\n")
+            writer.flush()
+            h.rotate_log_if_needed()
+            writer.write(b"after rotation\n")
+            writer.flush()
+        with open(h.TORRSERVER_LOG, "rb") as f:
+            self.assertEqual(f.read(), b"after rotation\n")
+
+    def test_the_logs_page_lists_only_existing_copies(self):
+        for name in ("TorrServer.log.1", "TorrServer.log.2"):
+            if os.path.exists(h.LOG_FILES[name]):
+                os.remove(h.LOG_FILES[name])
+        self.assertEqual(h.log_options().count("<option"), 1)
+        with open(h.LOG_FILES["TorrServer.log.1"], "w") as f:
+            f.write("old")
+        self.assertEqual(h.log_options().count("<option"), 2)
+        self.assertIn("TorrServer.log.1", h.logs_page())
 
     def test_log_names_whitelisted(self):
         self.assertIsNone(h.get_log_path("../../etc/passwd"))
-        self.assertIn("service.log", h.LOG_FILES)
+        self.assertEqual(sorted(h.LOG_FILES), ["TorrServer.log", "TorrServer.log.1", "TorrServer.log.2"])
 
 
 class LocalizeTests(Base):
@@ -956,7 +1051,7 @@ esac
 
     def test_every_route_and_method_is_protected(self):
         for path in ("/", "/settings", "/logs", "/browse?path=/", "/read-log?name=TorrServer.log",
-                     "/download-log?name=TorrServer.log", "/recommendations", "/restart-status"):
+                     "/download-log?name=TorrServer.log", "/recommendations", "/restart-status", "/server-state"):
             self.assertEqual(self.get(path)[0], 403, path)
         for path in ("/settings", "/restart", "/language"):
             status, _, _ = self.get(path, method="POST", data=b"x=1",
@@ -1120,6 +1215,161 @@ esac
         self.install_cgi(user="Vlad")
         h.is_dsm_admin = lambda user: user.lower() == "vlad"
         self.assertEqual(self.get(headers={"Cookie": "id=GOOD"})[0], 200)
+
+
+
+class StatusPortRowsTests(Base):
+    """The status card shows one row per protocol: its port, or Disabled."""
+
+    def page(self, https, force, http_port=8090, https_port=8091):
+        saved = (h.get_https_enabled, h.get_force_https, h.get_https_port, h.get_port)
+        h.get_https_enabled = lambda: https
+        h.get_force_https = lambda: force
+        h.get_https_port = lambda: https_port
+        h.get_port = lambda: http_port
+        try:
+            return h.main_page("nas.local")
+        finally:
+            (h.get_https_enabled, h.get_force_https, h.get_https_port, h.get_port) = saved
+
+    def rows(self, page):
+        import re
+        return dict(re.findall(r"<td>(HTTPS?)</td>\s*<td>([^<]*)</td>", page))
+
+    def test_http_only(self):
+        self.assertEqual(self.rows(self.page(False, False)), {"HTTP": "8090", "HTTPS": "Disabled"})
+
+    def test_http_and_https(self):
+        self.assertEqual(self.rows(self.page(True, False)), {"HTTP": "8090", "HTTPS": "8091"})
+
+    def test_https_only_shows_http_as_disabled(self):
+        self.assertEqual(self.rows(self.page(True, True)), {"HTTP": "Disabled", "HTTPS": "8091"})
+
+    def test_force_flag_is_ignored_while_https_is_off(self):
+        self.assertEqual(self.rows(self.page(False, True)), {"HTTP": "8090", "HTTPS": "Disabled"})
+
+
+class MemoryTests(Base):
+    def meminfo(self, text):
+        path = os.path.join(VAR, "meminfo")
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def test_used_and_total(self):
+        path = self.meminfo("MemTotal:  8388608 kB\nMemFree: 100 kB\nMemAvailable: 6291456 kB\n")
+        self.assertEqual(h.get_memory_text(path), "2.0 / 8.0 GB")
+
+    def test_unreadable_gives_dash(self):
+        self.assertEqual(h.get_memory_text(os.path.join(VAR, "missing")), "-")
+        self.assertEqual(h.get_memory_text(self.meminfo("nonsense\n")), "-")
+
+    def test_status_page_shows_memory(self):
+        page = h.main_page("nas.local")
+        self.assertIn("<td>Memory</td>", page)
+
+
+class CardIconTests(Base):
+    def titles(self, page):
+        import re
+        return re.findall(r'<span class="metric-icon[^"]*">(.*?)</span>\s*<span>([^<]*)</span>', page, re.S)
+
+    def test_every_card_title_has_an_svg_icon_and_no_leftover_marker(self):
+        pages = [h.main_page("nas.local"), h.settings_page()]
+        for page in pages:
+            self.assertNotIn("data-icon", page)
+            titles = self.titles(page)
+            self.assertTrue(titles)
+            for icon, name in titles:
+                self.assertTrue(icon.startswith("<svg"), name)
+
+    def test_icons_are_drawn_in_the_text_colour(self):
+        out = h.inline_icons('<span class="metric-icon" data-icon="lock"></span>')
+        self.assertIn("<svg", out)
+        self.assertNotIn("data-icon", out)
+        self.assertNotIn("🔒", out)
+
+    def test_all_markers_in_the_source_have_a_drawing(self):
+        import re
+        src = open(h.__file__, encoding="utf-8").read()
+        for name in set(re.findall(r'data-icon="([a-z]+)"', src)):
+            self.assertIn(name, h.CARD_ICONS)
+
+
+class StatusDirectoryTests(Base):
+    def rows(self, directory, fuse):
+        import re
+        saved = (h.get_torrserver_dir, h.read_file)
+        h.get_torrserver_dir = lambda: directory
+        real = h.read_file
+        h.read_file = lambda path, default="": ("1" if fuse else "0") if path == h.FUSE_FILE else real(path, default)
+        try:
+            page = h.main_page("nas.local")
+        finally:
+            h.get_torrserver_dir, h.read_file = saved
+        return dict(re.findall(r"<td>(Directory|FUSE)</td>\s*<td[^>]*>([^<]*)</td>", page))
+
+    def test_directory_and_fuse_rows(self):
+        self.assertEqual(self.rows("/volume1/docker/PlexTorr", True),
+                         {"Directory": "/volume1/docker/PlexTorr", "FUSE": "Enabled"})
+
+    def test_no_directory_says_not_set(self):
+        self.assertEqual(self.rows("", False), {"Directory": "Not set", "FUSE": "Disabled"})
+
+    def test_directory_is_escaped(self):
+        self.assertEqual(self.rows("/a/<b>", False)["Directory"], "/a/&lt;b&gt;")
+
+
+class SidebarAndLayoutTests(Base):
+    def test_every_page_uses_the_same_svg_sidebar(self):
+        for page in (h.main_page("nas.local"), h.settings_page(), h.logs_page()):
+            self.assertEqual(page.count('class="side-item'), 3)
+            self.assertEqual(page.count('class="side-icon"><svg'), 3)
+            for glyph in "▥⚙▤":
+                self.assertNotIn(glyph, page)
+
+    def test_save_bar_is_sticky_and_language_is_one_compact_row(self):
+        page = h.settings_page()
+        self.assertIn("save-bar", page)
+        self.assertIn("language-card", page)
+        self.assertEqual(page.count('<button type="submit">Save'), 1)
+        card = page[page.index('<div class="settings-card language-card">'):page.index("</form>")]
+        self.assertNotIn("settings-card-title", card)     # no card title, only the row label
+        self.assertIn("<svg", card)                       # ...with the same icon tile as the other cards
+
+
+class OutsideTextIsNotTranslatedTests(Base):
+    """Log lines and folder names are data: a key like "Start" must not touch them."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved = (h.load_locale, h.is_torrserver_running, h.TORRSERVER_LOG, h.get_torrserver_dir)
+        h.load_locale = lambda: {"Start": "Запустить", "Status": "Статус", "Disabled": "Выключено"}
+        h.is_torrserver_running = lambda: False
+        h.TORRSERVER_LOG = os.path.join(VAR, "TorrServer.log")
+        self.addCleanup(lambda: (setattr(h, "load_locale", self.saved[0]),
+                                 setattr(h, "is_torrserver_running", self.saved[1]),
+                                 setattr(h, "TORRSERVER_LOG", self.saved[2]),
+                                 setattr(h, "get_torrserver_dir", self.saved[3])))
+
+    def test_marked_text_is_left_alone_and_the_rest_is_translated(self):
+        out = h.localize_html('<button>Start</button><pre translate="no">Starting Status</pre><p>Status</p>')
+        self.assertIn("<button>Запустить</button>", out)
+        self.assertIn('<pre translate="no">Starting Status</pre>', out)
+        self.assertIn("<p>Статус</p>", out)
+
+    def test_log_lines_on_the_status_page(self):
+        with open(h.TORRSERVER_LOG, "w") as f:
+            f.write("UTC0 service: Starting TorrServer\n")
+        page = h.main_page("nas.local")
+        self.assertIn("service: Starting TorrServer", page)
+        self.assertNotIn("Запуститьing", page)
+
+    def test_folder_names_on_the_status_page(self):
+        h.get_torrserver_dir = lambda: "/volume1/Status/Start"
+        page = h.main_page("nas.local")
+        self.assertIn("/volume1/Status/Start", page)
+
 
 if __name__ == "__main__":
     unittest.main()

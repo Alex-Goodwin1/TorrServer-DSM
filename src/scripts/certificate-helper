@@ -8,15 +8,16 @@ CERT_ROOT="/usr/syno/etc/certificate"
 CONFIG_DIR="/var/packages/TorrServer/var"
 TARGET_CERT="${CONFIG_DIR}/server.pem"
 TARGET_KEY="${CONFIG_DIR}/server.key"
-LOG_FILE="${CONFIG_DIR}/Helper.log"
+LOG_FILE="${CONFIG_DIR}/TorrServer.log"
 
+# The same log as TorrServer's. This runs as root, so it only appends to a log
+# the service has already created, and never follows a symbolic link: a file
+# created here would belong to root and TorrServer could not write to it.
 log_message()
 {
-    if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -ge 2097152 ]; then
-        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null
-    fi
+    [ -f "$LOG_FILE" ] && [ ! -L "$LOG_FILE" ] || return 0
 
-    printf '%s certificate-helper: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null
+    printf '%s certificate-helper: %s\n' "$(date -u '+%Y/%m/%d %H:%M:%S UTC0')" "$1" >> "$LOG_FILE" 2>/dev/null
 }
 
 fail()

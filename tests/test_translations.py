@@ -359,7 +359,7 @@ class TranslationQuality(unittest.TestCase):
                 self.assertEqual(len(keys), 1, "%s: %r shared by %r" % (lang, value[:40], sorted(keys)))
 
     def test_no_translation_is_left_in_english(self):
-        proper = {"HTTPS", "DSM", "CPU", "Plex", "Emby", "Status", "System"}     # same word in some languages
+        proper = {"HTTPS", "DSM", "CPU", "Plex", "Emby", "Status", "System", "FUSE"}     # same word in some languages
         for lang in LANGS:
             same = [k for k, v in locale(lang).items()
                     if k == v and k not in proper and re.search(r"[A-Za-z]{3,}", k)]

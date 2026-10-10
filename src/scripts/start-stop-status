@@ -19,12 +19,14 @@ fi
 start_daemon ()
 {
     i=0
-    date > "${LOG_FILE}"
+    # Created here, by the package user, so root (certificate-helper) only ever
+    # appends to a file that belongs to the service.
+    : >> "${LOG_FILE}"
     service_prestart >> "${LOG_FILE}" 2>&1
     printf "%s" "$SERVICE_COMMAND" | while read -r service || [ -n "$service" ]
     do
         i=$((i + 1))
-        echo "Starting ${DNAME} command ${service}" >> "${LOG_FILE}"
+        service_log service "Starting ${DNAME} command ${service}"
         if [ -n "${service}" ]; then
             # The command line is split into words on purpose.
             # shellcheck disable=SC2086
@@ -45,13 +47,14 @@ stop_daemon ()
         # shellcheck disable=SC2013
         for pid in $(cat "${PID_FILE}")
         do
-            date >> "${LOG_FILE}"
-            echo "Stopping ${DNAME} service : $(ps -p"${pid}" -o comm=) (${pid})" >> "${LOG_FILE}"
+            service_log service "Stopping ${DNAME} service : $(ps -p"${pid}" -o comm=) (${pid})"
             kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1
             wait_for_status 1 "${SVC_WAIT_TIMEOUT:-20}" "${pid}" || kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1
         done
         rm -f "${PID_FILE}"
     fi
+    # TorrServer is gone: a FUSE mount it could not release must not stay behind.
+    cleanup_stale_fuse_mounts
 }
 
 #------------------------------------------------------
@@ -74,7 +77,13 @@ daemon_status ()
 
     for pid in ${pid_list}
     do
-        kill -0 "${pid}" > /dev/null 2>&1 || failed=$((failed + 1))
+        # A killed process nobody has reaped yet is a zombie: not running.
+        if kill -0 "${pid}" > /dev/null 2>&1 \
+            && ! grep -q '^State:[[:space:]]*Z' "/proc/${pid}/status" 2>/dev/null; then
+            :
+        else
+            failed=$((failed + 1))
+        fi
     done
 
     if [ "${failed}" -ne 0 ]; then
@@ -106,32 +115,55 @@ wait_for_status ()
     return 1
 }
 
+# The package counts as running while the helper (the first pid in PID_FILE)
+# is alive, even when TorrServer itself is stopped: DSM hides the desktop icon
+# of a stopped package, and the helper window is where TorrServer is started
+# again. Nothing here removes the pid file.
+helper_alive ()
+{
+    helper_pid=$(cut -d ' ' -f 1 "${PID_FILE}" 2>/dev/null)
+    case "${helper_pid}" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "${helper_pid}" > /dev/null 2>&1
+}
+
 case $1 in
     start)
-        if daemon_status; then
-            echo "${DNAME} is already running" >> "${LOG_FILE}"
-            exit 0
+        if helper_alive; then
+            if daemon_status; then
+                service_log service "${DNAME} is already running"
+                exit 0
+            fi
+            # The helper runs, TorrServer does not: start only TorrServer.
+            # (daemon_status above dropped the stale pid file, so put the
+            # helper pid back first; restart-torrserver reads it.)
+            service_log service "Starting TorrServer next to the running helper ..."
+            printf '%s' "${helper_pid}" > "${PID_FILE}"
+            sh "$(dirname "$0")/restart-torrserver"
+            exit $?
         else
-            echo "Starting ${DNAME} ..." >> "${LOG_FILE}"
+            service_log service "Starting ${DNAME} ..."
             start_daemon
             exit $?
         fi
         ;;
     stop)
-        if daemon_status; then
-            echo "Stopping ${DNAME} ..." >> "${LOG_FILE}"
+        if helper_alive; then
+            service_log service "Stopping ${DNAME} ..."
             stop_daemon
             exit $?
         else
-            echo "${DNAME} is not running" >> "${LOG_FILE}"
+            service_log service "${DNAME} is not running"
             exit 0
         fi
         ;;
     status)
-        if daemon_status; then
+        if helper_alive; then
             echo "${DNAME} is running"
             exit 0
         else
+            rm -f "${PID_FILE}"
             echo "${DNAME} is not running"
             exit 3
         fi

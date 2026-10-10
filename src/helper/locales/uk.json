@@ -7,7 +7,6 @@
   "Running": "Запущено",
   "Stopped": "Зупинено",
   "Version": "Версія",
-  "Web port": "Вебпорт",
   "HTTPS": "HTTPS",
   "Authentication": "Автентифікація",
   "Uptime": "Час роботи",
@@ -16,6 +15,10 @@
   "NAS model": "Модель NAS",
   "CPU": "CPU",
   "Cores": "Ядра",
+  "Memory": "Пам'ять",
+  "Directory": "Каталог",
+  "FUSE": "FUSE",
+  "Not set": "Не вказано",
   "Architecture": "Архітектура",
   "Information": "Інформація",
   "TorrServer project, Synology SPK package and support": "Проєкт TorrServer, пакет SPK для Synology та підтримка",
@@ -135,5 +138,6 @@
   "Start": "Запустити",
   "TorrServer directory": "Каталог TorrServer",
   "Using FUSE with Plex or Emby": "Використання FUSE з Plex і Emby",
-  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Необов’язково. Тут створюються каталоги Cache і FUSE: Cache для дискового кешу TorrServer, FUSE для віртуальної файлової системи. Дисковий кеш вмикається у веб-інтерфейсі TorrServer."
+  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Необов’язково. Тут створюються каталоги Cache і FUSE: Cache для дискового кешу TorrServer, FUSE для віртуальної файлової системи. Дисковий кеш вмикається у веб-інтерфейсі TorrServer.",
+  "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). The certificate source cannot be changed here while it is in use. To choose another source here, switch TorrServer back to its self-signed certificate on its page first.": "TorrServer використовує сертифікат, завантажений на його власній вебсторінці (Налаштування, Додатково, HTTPS). Поки він використовується, джерело сертифіката тут змінити не можна. Щоб вибрати інше джерело тут, спершу перемкніть TorrServer назад на самопідписаний сертифікат на його сторінці."
 }

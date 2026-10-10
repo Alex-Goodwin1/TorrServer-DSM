@@ -7,7 +7,6 @@
   "Running": "Запущен",
   "Stopped": "Остановлен",
   "Version": "Версия",
-  "Web port": "Веб-порт",
   "HTTPS": "HTTPS",
   "Authentication": "Аутентификация",
   "Uptime": "Время работы",
@@ -16,6 +15,10 @@
   "NAS model": "Модель NAS",
   "CPU": "CPU",
   "Cores": "Ядра",
+  "Memory": "Память",
+  "Directory": "Каталог",
+  "FUSE": "FUSE",
+  "Not set": "Не задан",
   "Architecture": "Архитектура",
   "Information": "Информация",
   "TorrServer project, Synology SPK package and support": "Проект TorrServer, пакет SPK для Synology и поддержка",
@@ -135,5 +138,6 @@
   "Start": "Запустить",
   "TorrServer directory": "Каталог TorrServer",
   "Using FUSE with Plex or Emby": "Использование FUSE с Plex и Emby",
-  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Необязательно. Здесь создаются папки Cache и FUSE: Cache для дискового кэша TorrServer, FUSE для виртуальной файловой системы. Дисковый кэш включается в веб-интерфейсе TorrServer."
+  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Необязательно. Здесь создаются папки Cache и FUSE: Cache для дискового кэша TorrServer, FUSE для виртуальной файловой системы. Дисковый кэш включается в веб-интерфейсе TorrServer.",
+  "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). The certificate source cannot be changed here while it is in use. To choose another source here, switch TorrServer back to its self-signed certificate on its page first.": "TorrServer использует сертификат, загруженный на его собственной веб-странице (Настройки, Дополнительно, HTTPS). Пока он используется, источник сертификата здесь изменить нельзя. Чтобы выбрать другой источник здесь, сначала переключите TorrServer обратно на самоподписанный сертификат на его странице."
 }

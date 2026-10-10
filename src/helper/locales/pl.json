@@ -7,7 +7,6 @@
   "Running": "Uruchomiony",
   "Stopped": "Zatrzymany",
   "Version": "Wersja",
-  "Web port": "Port WWW",
   "HTTPS": "HTTPS",
   "Authentication": "Uwierzytelnianie",
   "Uptime": "Czas działania",
@@ -16,6 +15,10 @@
   "NAS model": "Model NAS",
   "CPU": "CPU",
   "Cores": "Rdzenie",
+  "Memory": "Pamięć",
+  "Directory": "Katalog",
+  "FUSE": "FUSE",
+  "Not set": "Nie ustawiono",
   "Architecture": "Architektura",
   "Information": "Informacje",
   "TorrServer project, Synology SPK package and support": "Projekt TorrServer, pakiet SPK dla Synology i wsparcie",
@@ -135,5 +138,6 @@
   "Start": "Uruchom",
   "TorrServer directory": "Katalog TorrServer",
   "Using FUSE with Plex or Emby": "Używanie FUSE z Plex i Emby",
-  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Opcjonalne. Tutaj tworzone są foldery Cache i FUSE: Cache dla pamięci podręcznej TorrServer na dysku, FUSE dla wirtualnego systemu plików. Pamięć podręczna na dysku jest włączana w interfejsie webowym TorrServer."
+  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Opcjonalne. Tutaj tworzone są foldery Cache i FUSE: Cache dla pamięci podręcznej TorrServer na dysku, FUSE dla wirtualnego systemu plików. Pamięć podręczna na dysku jest włączana w interfejsie webowym TorrServer.",
+  "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). The certificate source cannot be changed here while it is in use. To choose another source here, switch TorrServer back to its self-signed certificate on its page first.": "TorrServer używa certyfikatu wgranego na jego własnej stronie (Ustawienia, Zaawansowane, HTTPS). Dopóki jest używany, źródła certyfikatu nie można tu zmienić. Aby wybrać inne źródło tutaj, najpierw przełącz TorrServer z powrotem na certyfikat z podpisem własnym na jego stronie."
 }

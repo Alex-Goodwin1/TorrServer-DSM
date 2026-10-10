@@ -3,6 +3,66 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.7.146 (2026-10-09)
+
+TorrServer stays at `MatriX.146`.
+
+### Fixed
+
+- **A FUSE folder that could not be opened.** When TorrServer ended without
+  releasing its FUSE mount (killed, crashed, or the folder was changed while
+  Plex or Docker still used it), the mount was left behind with nothing serving
+  it, and the folder could not be opened at all, not even in File Station.
+  The package now removes such leftover mounts every time TorrServer starts,
+  restarts or stops (never while TorrServer is running), and writes what it
+  did to `TorrServer.log`. If one cannot be removed, the log gives the command
+  to run by hand (`umount -l <mount point>`).
+
+## 2.6.146 (2026-10-09)
+
+TorrServer updated from `MatriX.145.2` to `MatriX.146`.
+
+### Changed
+
+- **One log file.** `TorrServer.log` now holds everything: TorrServer, the
+  start / stop / restart scripts, the Helper and the certificate script, all in
+  TorrServer's own line format. It is no longer wiped when the service starts,
+  so what happened before a crash is still there, and it can be read or
+  downloaded while TorrServer is stopped. The Logs tab lists the log and its
+  rotated copies. `service.log` and `Helper.log` are removed on upgrade.
+- **Status page:** separate **HTTP** and **HTTPS** rows with their ports or
+  "Disabled" (with "HTTPS only" the stale HTTP port is gone), new **Directory**
+  and **FUSE** rows, and the NAS memory (**Memory**).
+- When TorrServer has stopped, the status page shows a **Start** button on the
+  right of the status card (where the Open buttons are while it runs), with
+  the last lines of the log below the status. The page notices a stop or
+  start done elsewhere (TorrServer's own page, a crash) and updates by itself.
+- **DSM keeps the package "Running" while the Helper runs**, even if TorrServer
+  itself is stopped, so the desktop icon does not disappear and the Helper
+  window stays reachable to start TorrServer again. "Start" in Package Center
+  starts TorrServer next to the running Helper.
+- Log lines and folder names are no longer run through the translation (a
+  log line "Starting ..." could show up as "Запуститьing ..." in Russian).
+- **Settings:** the Save / Restart bar stays at the bottom of the window, the
+  language is one compact row, and the card titles and the side menu use one
+  set of line icons instead of mixed symbols.
+- **Certificate:** choosing "TorrServer's own (self-signed)" again after the
+  DSM or own-files certificate now really switches back; the copied
+  certificate used to stay in place and kept being served.
+- **Certificate uploaded in TorrServer 146:** while a certificate uploaded on
+  TorrServer's own web page is in use (it takes priority), the SSL card on the
+  Settings page says so and the certificate source cannot be changed there.
+  After TorrServer is switched back to its self-signed certificate, the choice
+  (TorrServer, DSM, own paths) is available again.
+- **"Manual paths" certificate source is gone** from the Settings page: since
+  TorrServer 146 an own certificate is uploaded (or pointed to) on TorrServer's
+  own page (Settings, Additional, HTTPS). An installation that already uses
+  manual paths keeps working and keeps the option.
+- **Python 3:** the Helper looks for Python in `/bin`, `/usr/bin` and the
+  Python 3 package. If none is found the installation stops with a message
+  that says what to install (and the log says so as well), instead of
+  installing a package whose window cannot open.
+
 ## 2.5.145.2 (2026-10-08)
 
 TorrServer itself is unchanged (`MatriX.145.2`).

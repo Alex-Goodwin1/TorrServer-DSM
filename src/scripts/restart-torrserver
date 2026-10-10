@@ -24,7 +24,7 @@ LOCK_DIR="${CONFIG_DIR}/restart.lock"
 
 log()
 {
-    printf '%s restart-torrserver: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "${LOG_FILE}"
+    service_log restart-torrserver "$1"
 }
 
 # A killed process whose parent has not reaped it yet is a zombie.

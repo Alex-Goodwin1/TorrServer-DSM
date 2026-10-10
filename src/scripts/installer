@@ -3,9 +3,6 @@
 # DSM 7.3 or newer only. The package ships no var/ or config/ folder, so
 # there is nothing to migrate from older DSM versions and nothing to sync.
 
-# installer log is not writable, use for reference only.
-INST_LOG="/var/log/packages/${SYNOPKG_PKGNAME}.log"
-
 install_log ()
 {
     local _msg_="$@"
@@ -66,6 +63,16 @@ preinst ()
 {
     log_step "preinst"
 
+    # The Helper (the settings window) is written in Python 3. DSM 7 normally
+    # includes it; without it the package would install but could not be set
+    # up. stdout is shown to the user in the Package Center dialog.
+    if [ -z "${PYTHON_BIN}" ]; then
+        echo "Python 3 was not found, and TorrServer DSM needs it for its settings window."
+        echo "Install the Python 3 package from DSM Package Center, then install TorrServer DSM again."
+        install_log "ERROR: Python 3 was not found"
+        exit 1
+    fi
+
     exit 0
 }
 
@@ -91,9 +98,8 @@ postinst ()
 
     call_func "service_postinst" install_log
 
-    if [ -n "${LOG_FILE}" ]; then
-        echo "Installation log: ${INST_LOG}" >> ${LOG_FILE}
-    fi
+    # Nothing is written to the package log here: the installer runs as root,
+    # and a log file created by root could not be written by TorrServer.
 
     exit 0
 }

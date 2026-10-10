@@ -33,17 +33,15 @@ USERNAME_MAX_LENGTH = 64
 # TORRSERVER_DSM_VAR exists for the test suite; DSM never sets it.
 PACKAGE_VAR = os.environ.get("TORRSERVER_DSM_VAR") or "/var/packages/TorrServer/var"
 TORRSERVER_BIN = "/var/packages/TorrServer/target/bin/TorrServer"
+# The one log of the package: TorrServer, the start/stop scripts, the Helper
+# and certificate-helper all append to it. The Helper rotates it by size.
 TORRSERVER_LOG = os.path.join(PACKAGE_VAR, "TorrServer.log")
-
-SERVICE_LOG = os.path.join(PACKAGE_VAR, "service.log")
 
 LOG_FILES = {
     "TorrServer.log": TORRSERVER_LOG,
     "TorrServer.log.1": TORRSERVER_LOG + ".1",
     "TorrServer.log.2": TORRSERVER_LOG + ".2",
-    "service.log": SERVICE_LOG,
 }
-ROTATED_LOGS = (TORRSERVER_LOG, SERVICE_LOG)
 LOG_MAX_SIZE = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 2
 
@@ -65,6 +63,12 @@ SSL_KEY_FILE = os.path.join(PACKAGE_VAR, "torrserver.ssl.key")
 HELPER_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_LOGO_FILE = os.path.join(HELPER_DIR, "torrserver-status.png")
 
+# The pair certificate-helper copies here for "DSM" and "own files"; TorrServer
+# uses it when it is there and makes its own self-signed pair when it is not.
+SERVER_CERT_FILES = (os.path.join(PACKAGE_VAR, "server.pem"), os.path.join(PACKAGE_VAR, "server.key"))
+# Where TorrServer 146+ keeps a certificate uploaded on its own web page. While
+# it exists, TorrServer's saved settings point at it and it wins over server.pem.
+UPLOADED_CERT_FILE = os.path.join(PACKAGE_VAR, "ssl", "uploaded.crt")
 SSL_CERT_MODE_SELF = "self"
 SSL_CERT_MODE_DSM = "dsm"
 SSL_CERT_MODE_MANUAL = "manual"
@@ -284,6 +288,7 @@ def load_locale(language=None):
 _HTML_TOKEN_RE = re.compile(
     r"(<script\b[^>]*>)(.*?)(</script>)"      # 1-3: script open / body / close
     r"|<style\b.*?</style>"                   # style: never translated
+    r"|<(pre|td|span|div)\b[^>]*\btranslate=\"no\"[^>]*>.*?</\4>"   # 4: data (log lines, paths)
     r"|<!--.*?-->"                             # comments: never translated
     r"|<[^>]+>",                               # any other tag
     re.S | re.I,
@@ -292,6 +297,32 @@ _TRANSLATABLE_ATTR_RE = re.compile(
     r"""(\b(?:placeholder|title|alt|aria-label)\s*=\s*)("[^"]*"|'[^']*')""",
     re.I,
 )
+
+
+CARD_ICONS = {
+    "status": '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/>'
+              '<rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    "settings": '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>',
+    "logs": '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h7"/>',
+    "server": '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/>'
+              '<path d="M7 7.5h.01M7 16.5h.01"/>',
+    "cpu": '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/>'
+           '<path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+    "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+    "key": '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M17 6l3 3M14.5 8.5l2 2"/>',
+    "lock": '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.4 3.8 5.4 3.8 9s-1.3 6.6-3.8 9c-2.5-2.4-3.8-5.4-3.8-9S9.5 5.4 12 3z"/>',
+    "shield": '<path d="M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+}
+
+
+def inline_icons(content):
+    """Replace data-icon markers by inline SVG, drawn in the text colour."""
+    def draw(match):
+        name = match.group(2)
+        return '{}><svg viewBox="0 0 24 24" aria-hidden="true">{}</svg>'.format(
+            match.group(1), CARD_ICONS[name])
+    return re.sub(r'(<span class="(?:metric|side)-icon[^"]*") data-icon="([a-z]+)">', draw, content)
 
 
 def localize_html(content):
@@ -304,10 +335,15 @@ def localize_html(content):
     * the placeholder / title / alt / aria-label attributes,
     * string literals inside <script> (the key must start right after a quote).
 
+    Text from outside (log lines, folder names) is wrapped in an element with
+    translate="no" and is never changed: a key such as "Start" must not turn
+    "Starting" into "Запуститьing" or a folder called "Status" into "Статус".
+
     Everything else (``value``, ``href``, ``id``, ``onclick``, identifiers in
     scripts, CSS, ``data:`` URIs) is left untouched, so form values typed by
     the user, paths and embedded images can never be altered by a translation.
     """
+    content = inline_icons(content)
     translations = {
         source: str(translated)
         for source, translated in load_locale().items()
@@ -357,6 +393,8 @@ def localize_html(content):
             parts.append(match.group(1))
             parts.append(translate_script(match.group(2)))
             parts.append(match.group(3))
+        elif match.group(4) is not None:
+            parts.append(token)          # marked translate="no": shown as it is
         elif token.startswith("<") and not re.match(r"<(?:style|!--)", token, re.I):
             parts.append(translate_tag(token))
         else:
@@ -380,15 +418,11 @@ def language_selector():
         )
 
     return """
-<div class="settings-card">
-    <div class="settings-card-title">
-        <span class="metric-icon">文</span>
-        <span>Language</span>
-    </div>
+<div class="settings-card language-card">
     <div class="settings-card-body">
         <form method="post" action="./language">
             <div class="form-row">
-                <label for="language">Language</label>
+                <label for="language"><span class="metric-icon" data-icon="globe"></span><span>Language</span></label>
                 <select id="language" name="language" onchange="this.form.submit()">
                     {}
                 </select>
@@ -519,6 +553,24 @@ def get_cpu_cores():
         return os.cpu_count() or 1
     except Exception:
         return 1
+
+
+def get_memory_text(path="/proc/meminfo"):
+    """RAM as "used / total GB", or "-" when it cannot be read."""
+    try:
+        values = {}
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                name, _, rest = line.partition(":")
+                parts = rest.split()
+                if parts and parts[0].isdigit():
+                    values[name] = int(parts[0])
+        total = values["MemTotal"]
+        used = total - values.get("MemAvailable", values.get("MemFree", 0))
+        gb = 1024.0 * 1024.0
+        return "{:.1f} / {:.1f} GB".format(used / gb, total / gb)
+    except (OSError, KeyError, ValueError):
+        return "-"
 
 
 def get_architecture():
@@ -1012,26 +1064,13 @@ def restart_finished():
 
 
 def last_problem_lines(count=3, width=220):
-    """The last lines of whichever service log was written most recently.
+    """The last lines of the log.
 
     That is where TorrServer's own start-up errors end up (for example a port
     that is already taken), so the status page can say why it is stopped.
     """
-    newest = None
-
-    for path in (TORRSERVER_LOG, SERVICE_LOG):
-        try:
-            modified = os.path.getmtime(path)
-        except OSError:
-            continue
-        if newest is None or modified > newest[0]:
-            newest = (modified, path)
-
-    if newest is None:
-        return []
-
     try:
-        with open(newest[1], "rb") as handle:
+        with open(TORRSERVER_LOG, "rb") as handle:
             handle.seek(0, os.SEEK_END)
             handle.seek(max(0, handle.tell() - 16384))
             text = handle.read().decode("utf-8", errors="replace")
@@ -1044,19 +1083,21 @@ def last_problem_lines(count=3, width=220):
 
 def stopped_info_html():
     lines = last_problem_lines()
-    block = '<div class="stopped-info">'
+    if not lines:
+        return ""
 
-    if lines:
-        block += '<div class="status-subtitle">Last lines of the log:</div><pre>{}</pre>'.format(
-            html.escape("\n".join(lines))
-        )
+    return (
+        '<div class="stopped-info">'
+        '<div class="status-subtitle">Last lines of the log:</div><pre translate="no">{}</pre>'
+        '</div>'
+    ).format(html.escape("\n".join(lines)))
 
-    block += (
-        '<form method="post" action="./restart">'
-        '<button type="submit">Start</button>'
-        '</form></div>'
-    )
-    return block
+
+START_ACTION = (
+    '        <div class="web-ui-action">'
+    '<form method="post" action="./restart"><button type="submit">Start</button></form>'
+    '</div>\n'
+)
 
 
 def restart_in_progress():
@@ -1365,6 +1406,13 @@ def save_settings(params):
     ssl_cert = field("ssl_cert").strip()
     ssl_key = field("ssl_key").strip()
 
+    # A certificate uploaded on TorrServer's own page is in charge: the source
+    # chosen here is not changed while it is in use.
+    cert_locked = uploaded_cert_active()
+    if cert_locked:
+        ssl_mode = get_ssl_mode()
+        ssl_cert, ssl_key = get_ssl_paths()
+
     old_port = get_port()
     old_https_port = get_https_port()
     saved_username, saved_password = get_saved_account()
@@ -1374,9 +1422,14 @@ def save_settings(params):
     if ssl_mode not in (SSL_CERT_MODE_SELF, SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL):
         return False, "Invalid certificate mode"
 
+    # New own-path setups are made on TorrServer's page; only an installation
+    # that already uses them keeps the option.
+    if ssl_mode == SSL_CERT_MODE_MANUAL and get_ssl_mode() != SSL_CERT_MODE_MANUAL and not cert_locked:
+        return False, "Invalid certificate mode"
+
     # Everything else works without root. Only certificates that have to be
     # copied from DSM (or from a root-readable path) need the optional rule.
-    if ssl_mode != SSL_CERT_MODE_SELF and not has_privileged_access():
+    if not cert_locked and ssl_mode != SSL_CERT_MODE_SELF and not has_privileged_access():
         return False, "Additional DSM permissions are required for DSM and manual certificates."
 
     # The directory is optional: without one TorrServer keeps its data in the
@@ -1394,13 +1447,13 @@ def save_settings(params):
         if cache_browser_path(torrserver_dir) != torrserver_dir:
             return False, "Invalid TorrServer directory"
 
-    if ssl_mode == SSL_CERT_MODE_MANUAL:
+    if not cert_locked and ssl_mode == SSL_CERT_MODE_MANUAL:
         if not ssl_cert or not ssl_key:
             return False, "Certificate and key paths are required"
         if not valid_volume_path(ssl_cert) or not valid_volume_path(ssl_key):
             return False, "Manual certificate and key must be inside /volumeX/"
 
-    if ssl_mode == SSL_CERT_MODE_DSM:
+    if not cert_locked and ssl_mode == SSL_CERT_MODE_DSM:
         valid = {(x["cert"], x["key"]) for x in get_dsm_certificates()}
         if (ssl_cert, ssl_key) not in valid:
             return False, "Invalid DSM certificate selection"
@@ -1459,6 +1512,8 @@ def save_settings(params):
         if status == "error":
             return False, cache_message
 
+    previous_ssl_mode = get_ssl_mode()
+
     try:
         if auth == "1":
             save_account(username, password, saved_username)
@@ -1473,6 +1528,15 @@ def save_settings(params):
         write_file(SSL_MODE_FILE, ssl_mode)
         write_file(SSL_CERT_FILE, ssl_cert)
         write_file(SSL_KEY_FILE, ssl_key)
+
+        # Back to TorrServer's own certificate: drop the copied DSM / own
+        # pair, or TorrServer keeps serving it.
+        if ssl_mode == SSL_CERT_MODE_SELF and previous_ssl_mode != SSL_CERT_MODE_SELF:
+            for path in SERVER_CERT_FILES:
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
     except OSError as e:
         return False, "Unable to write settings: {}".format(e)
 
@@ -1535,8 +1599,7 @@ def rotate_log(path):
 
 
 def rotate_log_if_needed():
-    for path in ROTATED_LOGS:
-        rotate_log(path)
+    rotate_log(TORRSERVER_LOG)
 
 
 def page_header(title="TorrServer"):
@@ -1730,15 +1793,35 @@ button.danger:disabled,
     margin: 8px 0;
 }}
 
+.cert-fields {{
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}}
+
+.cert-fields[disabled] {{
+    display: none;
+}}
+
 .stopped-info {{
-    margin-top: 10px;
+    flex: 0 0 calc(100% - 90px);
+    min-width: 0;
+    margin: 14px 0 0 90px;
+}}
+
+.status-banner:has(.stopped-info) {{
+    flex-wrap: wrap;
 }}
 
 .stopped-info pre {{
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-x: auto;
     min-height: 0;
     font-size: 12px;
     padding: 10px 12px;
-    margin: 6px 0 10px;
+    margin: 6px 0 0;
 }}
 
 .status-restarting {{
@@ -1844,8 +1927,20 @@ pre {{
 
 .side-icon {{
     width: 22px;
-    text-align: center;
-    font-size: 18px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}}
+
+.side-icon svg {{
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }}
 
 .app-content {{
@@ -1948,8 +2043,16 @@ pre {{
     justify-content: center;
     background: #edf3fa;
     color: #354b68;
-    font-size: 11px;
-    font-weight: 700;
+}}
+
+.metric-icon svg {{
+    width: 19px;
+    height: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }}
 
 .metric-table td {{
@@ -1961,6 +2064,10 @@ pre {{
     width: 46%;
     font-weight: 400;
     color: #40536f;
+}}
+
+.metric-table td.path-value {{
+    word-break: break-all;
 }}
 
 .metric-table td:last-child {{
@@ -1982,6 +2089,21 @@ pre {{
     box-shadow: 0 1px 3px rgba(30,50,80,.06);
     margin-bottom: 16px;
     overflow: hidden;
+}}
+
+.language-card .settings-card-body {{
+    padding-top: 12px;
+    padding-bottom: 12px;
+}}
+
+.language-card .form-row {{
+    margin-bottom: 0;
+}}
+
+.language-card label {{
+    display: flex;
+    align-items: center;
+    gap: 11px;
 }}
 
 .settings-card.disabled {{
@@ -2034,6 +2156,14 @@ pre {{
 .settings-card .help {{
     margin: 4px 0 0;
     color: #64748b;
+}}
+
+.settings-card.save-bar {{
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-bottom: 0;
+    box-shadow: 0 -3px 10px rgba(30,50,80,.10);
 }}
 
 .settings-card .actions {{
@@ -2286,16 +2416,16 @@ def page_footer():
 
 def app_sidebar(active):
     items = [
-        ("./", "▥", "Status", "status"),
-        ("./settings", "⚙", "Settings", "settings"),
-        ("./logs", "▤", "Logs", "logs"),
+        ("./", "status", "Status", "status"),
+        ("./settings", "settings", "Settings", "settings"),
+        ("./logs", "logs", "Logs", "logs"),
     ]
 
     parts = ['<div class="app-sidebar">']
     for href, icon, label, key in items:
         cls = "side-item active" if key == active else "side-item"
         parts.append(
-            '<a class="{}" href="{}"><span class="side-icon">{}</span><span>{}</span></a>'.format(
+            '<a class="{}" href="{}"><span class="side-icon" data-icon="{}"></span><span>{}</span></a>'.format(
                 cls, href, icon, label
             )
         )
@@ -2339,6 +2469,37 @@ RESTART_WATCH_SCRIPT = """
 </script>
 """
 
+# While nothing is restarting, the status page notices by itself that
+# TorrServer was stopped or started somewhere else (its own web page, DSM).
+STATE_WATCH_SCRIPT = """
+<script>
+(function () {
+    var shown = '__STATE__';
+
+    function poll() {
+        if (document.hidden) {
+            setTimeout(poll, 5000);
+            return;
+        }
+
+        fetch('./server-state', {cache: 'no-store', credentials: 'same-origin'})
+            .then(function (response) { return response.text(); })
+            .then(function (text) {
+                var now = text.trim();
+                if ((now === 'running' || now === 'stopped') && now !== shown) {
+                    window.location.reload();
+                } else {
+                    setTimeout(poll, 5000);
+                }
+            })
+            .catch(function () { setTimeout(poll, 8000); });
+    }
+
+    setTimeout(poll, 5000);
+})();
+</script>
+"""
+
 
 def main_page(host):
     status = get_status()
@@ -2346,6 +2507,12 @@ def main_page(host):
     configured_port = get_port()
     configured_https = get_https_enabled()
     auth = get_auth_enabled()
+
+    # Each protocol shows its own port, or "Disabled" (HTTPS off, or HTTP
+    # switched off by "HTTPS only").
+    http_off = configured_https and get_force_https()
+    http_value = "Disabled" if http_off else str(configured_port)
+    https_value = str(get_https_port()) if configured_https else "Disabled"
 
     running = get_running_ports()
     running_http_port = running["http"]
@@ -2396,6 +2563,10 @@ def main_page(host):
         else:
             status_text = "TorrServer is not running."
 
+    if status == "Stopped" and not restarting:
+        # Where the "Open" buttons are while TorrServer runs.
+        web_ui_actions = START_ACTION
+
     status_logo = get_status_logo_data_uri()
 
     body = page_header("TorrServer")
@@ -2403,22 +2574,7 @@ def main_page(host):
     body += """
 <div class="app-shell">
 
-<div class="app-sidebar">
-    <a class="side-item active" href="./">
-        <span class="side-icon">▥</span>
-        <span>Status</span>
-    </a>
-
-    <a class="side-item" href="./settings">
-        <span class="side-icon">⚙</span>
-        <span>Settings</span>
-    </a>
-
-    <a class="side-item" href="./logs">
-        <span class="side-icon">▤</span>
-        <span>Logs</span>
-    </a>
-</div>
+{sidebar}
 
 <div class="app-content">
 
@@ -2431,16 +2587,16 @@ def main_page(host):
     <div class="status-text">
         <div class="{0}">{1}</div>
         <div class="status-subtitle">{14}</div>
-        {stopped_info}
     </div>
     {15}
+    {stopped_info}
 </div>
 
 <div class="dashboard-grid">
 
 <div class="dashboard-card">
     <div class="dashboard-card-title">
-        <span class="metric-icon server-icon">TS</span>
+        <span class="metric-icon server-icon" data-icon="server"></span>
         <span>TorrServer</span>
     </div>
 
@@ -2450,12 +2606,20 @@ def main_page(host):
             <td>{4}</td>
         </tr>
         <tr>
-            <td>Web port</td>
+            <td>HTTP</td>
             <td>{5}</td>
         </tr>
         <tr>
             <td>HTTPS</td>
             <td>{6}</td>
+        </tr>
+        <tr>
+            <td>Directory</td>
+            <td class="path-value" translate="no">{directory}</td>
+        </tr>
+        <tr>
+            <td>FUSE</td>
+            <td>{fuse}</td>
         </tr>
         <tr>
             <td>Authentication</td>
@@ -2470,7 +2634,7 @@ def main_page(host):
 
 <div class="dashboard-card">
     <div class="dashboard-card-title">
-        <span class="metric-icon system-icon">▣</span>
+        <span class="metric-icon system-icon" data-icon="cpu"></span>
         <span>System</span>
     </div>
 
@@ -2492,6 +2656,10 @@ def main_page(host):
             <td>{12}</td>
         </tr>
         <tr>
+            <td>Memory</td>
+            <td>{memory}</td>
+        </tr>
+        <tr>
             <td>Architecture</td>
             <td>{13}</td>
         </tr>
@@ -2503,7 +2671,7 @@ def main_page(host):
     <div class="info-maintainer-top">Synology SPK package maintained by vladlenas</div>
 
     <div class="dashboard-card-title">
-        <span class="metric-icon">i</span>
+        <span class="metric-icon" data-icon="info"></span>
         <span>Information</span>
     </div>
 
@@ -2531,8 +2699,8 @@ def main_page(host):
         html.escape(host),
         configured_port,
         html.escape(get_torrserver_version()),
-        configured_port,
-        "Enabled" if configured_https else "Disabled",
+        http_value,
+        https_value,
         "Enabled" if auth else "Disabled",
         html.escape(get_torrserver_uptime()),
         html.escape(get_dsm_version()),
@@ -2541,13 +2709,21 @@ def main_page(host):
         get_cpu_cores(),
         html.escape(get_architecture()),
         status_text,
-        '<div class="web-ui-actions">{}</div>'.format(web_ui_actions) if web_ui_actions else '',
+        '<div class="web-ui-actions{}">{}</div>'.format(
+            ' start-actions' if web_ui_actions is START_ACTION else '', web_ui_actions
+        ) if web_ui_actions else '',
         status_logo,
+        memory=html.escape(get_memory_text()),
+        sidebar=app_sidebar("status"),
+        directory=html.escape(get_torrserver_dir() or "Not set"),
+        fuse="Enabled" if read_file(FUSE_FILE, "0") == "1" else "Disabled",
         stopped_info=stopped_info_html() if (status == "Stopped" and not restarting) else "",
     )
 
     if restarting:
         body += RESTART_WATCH_SCRIPT
+    else:
+        body += STATE_WATCH_SCRIPT.replace("__STATE__", status.lower())
 
     body += page_footer()
     return localize_html(body)
@@ -2556,7 +2732,7 @@ def main_page(host):
 AUTH_CARD = """
 <div class="settings-card">
     <div class="settings-card-title">
-        <span class="metric-icon">●</span>
+        <span class="metric-icon" data-icon="key"></span>
         <span>Authentication</span>
     </div>
     <div class="settings-card-body">
@@ -2583,6 +2759,31 @@ AUTH_CARD = """
     </div>
 </div>
 """
+
+
+def manual_option(ssl_mode, privileged):
+    """Own certificate paths are set on TorrServer's page now; the option stays
+    only for an installation that already uses it."""
+    if ssl_mode != SSL_CERT_MODE_MANUAL:
+        return ""
+    return '<option value="manual" selected {}>Manual paths</option>'.format("" if privileged else "disabled")
+
+
+UPLOADED_CERT_NOTICE = (
+    "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). "
+    "The certificate source cannot be changed here while it is in use. To choose another source here, "
+    "switch TorrServer back to its self-signed certificate on its page first."
+)
+
+
+def uploaded_cert_active():
+    return os.path.isfile(UPLOADED_CERT_FILE)
+
+
+def uploaded_cert_notice():
+    if not uploaded_cert_active():
+        return ""
+    return '<div class="notice">{}</div>'.format(UPLOADED_CERT_NOTICE)
 
 
 def permissions_block(privileged):
@@ -2675,7 +2876,7 @@ def settings_page(message="", torrserver_dir_override=""):
 
 <div class="settings-card">
     <div class="settings-card-title">
-        <span class="metric-icon">TS</span>
+        <span class="metric-icon" data-icon="server"></span>
         <span>TorrServer</span>
     </div>
     <div class="settings-card-body">
@@ -2738,7 +2939,7 @@ def settings_page(message="", torrserver_dir_override=""):
 
 <div class="settings-card">
     <div class="settings-card-title">
-        <span class="metric-icon">🔒</span>
+        <span class="metric-icon" data-icon="lock"></span>
         <span>HTTPS</span>
     </div>
     <div class="settings-card-body">
@@ -2767,17 +2968,20 @@ def settings_page(message="", torrserver_dir_override=""):
 
 <div class="settings-card">
     <div class="settings-card-title">
-        <span class="metric-icon">▣</span>
+        <span class="metric-icon" data-icon="shield"></span>
         <span>SSL Certificate</span>
     </div>
     <div class="settings-card-body">
 
+        {uploaded_cert}
+
+        <fieldset class="cert-fields" {cert_locked}>
         <div class="form-row">
             <label for="sslMode">Certificate source</label>
             <select name="ssl_mode" id="sslMode" onchange="toggleSslMode()">
                 <option value="self" {}>TorrServer self-signed</option>
                 <option value="dsm" {} {}>DSM certificate</option>
-                <option value="manual" {} {}>Manual paths</option>
+                {}
             </select>
         </div>
 
@@ -2803,13 +3007,14 @@ def settings_page(message="", torrserver_dir_override=""):
         <div class="help">
             The selected source will be synchronized to TorrServer server.pem/server.key.
         </div>
+        </fieldset>
 
         {permissions}
 
     </div>
 </div>
 
-<div class="settings-card">
+<div class="settings-card save-bar">
     <div class="actions">
         <button type="submit">Save</button>
         <button type="submit" formaction="./restart" class="danger">Restart</button>
@@ -2913,8 +3118,7 @@ toggleFuseHint();
         "selected" if ssl_mode == SSL_CERT_MODE_SELF else "",
         "selected" if ssl_mode == SSL_CERT_MODE_DSM else "",
         "disabled" if not privileged else "",
-        "selected" if ssl_mode == SSL_CERT_MODE_MANUAL else "",
-        "disabled" if not privileged else "",
+        manual_option(ssl_mode, privileged),
         "".join(
             '<option value="{}|{}" {}>{}</option>'.format(
                 html.escape(item["cert"], quote=True),
@@ -2927,6 +3131,8 @@ toggleFuseHint();
         html.escape(ssl_cert, quote=True),
         html.escape(ssl_key, quote=True),
         permissions=permissions_block(privileged),
+        uploaded_cert=uploaded_cert_notice(),
+        cert_locked="disabled" if uploaded_cert_active() else "",
         auth_card=AUTH_CARD.format(
             "checked" if auth else "",
             html.escape(saved_username, quote=True),
@@ -3050,6 +3256,15 @@ def cache_browser_page(path, target="cache"):
     body += page_footer()
     return localize_html(body)
 
+def log_options():
+    """The log and its rotated copies that exist (the log itself always)."""
+    names = [
+        name for name, path in LOG_FILES.items()
+        if name == "TorrServer.log" or os.path.isfile(path)
+    ]
+    return "\n        ".join('<option value="{0}">{0}</option>'.format(name) for name in names)
+
+
 def logs_page():
     body = page_header("TorrServer Logs")
 
@@ -3066,8 +3281,7 @@ def logs_page():
 
 <div class="logs-toolbar">
     <select id="logSelect">
-        <option value="TorrServer.log">TorrServer.log</option>
-        <option value="TorrServer.log.1">TorrServer.log.1</option>
+        {log_options}
     </select>
 
     <button type="button" onclick="openLog()">↻ Refresh</button>
@@ -3116,7 +3330,7 @@ function openLog() {{
 document.getElementById("logSelect").addEventListener("change", openLog);
 window.addEventListener("load", openLog);
 </script>
-""".format(sidebar=app_sidebar("logs"))
+""".format(sidebar=app_sidebar("logs"), log_options=log_options())
 
     body += page_footer()
     return localize_html(body)
@@ -3296,6 +3510,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/":
             self.send_html(main_page(self.request_host()))
+            return
+
+        if path == "/server-state":
+            self.send_text(get_status().lower())
             return
 
         if path == "/restart-status":

@@ -7,7 +7,6 @@
   "Running": "Veikia",
   "Stopped": "Sustabdyta",
   "Version": "Versija",
-  "Web port": "Žiniatinklio prievadas",
   "HTTPS": "HTTPS",
   "Authentication": "Autentifikavimas",
   "Uptime": "Veikimo laikas",
@@ -16,6 +15,10 @@
   "NAS model": "NAS modelis",
   "CPU": "CPU",
   "Cores": "Branduoliai",
+  "Memory": "Atmintis",
+  "Directory": "Katalogas",
+  "FUSE": "FUSE",
+  "Not set": "Nenurodytas",
   "Architecture": "Architektūra",
   "Information": "Informacija",
   "TorrServer project, Synology SPK package and support": "TorrServer projektas, Synology SPK paketas ir palaikymas",
@@ -135,5 +138,6 @@
   "Start": "Paleisti",
   "TorrServer directory": "TorrServer katalogas",
   "Using FUSE with Plex or Emby": "FUSE naudojimas su Plex ir Emby",
-  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Neprivaloma. Čia sukuriami aplankai Cache ir FUSE: Cache skirtas TorrServer disko talpyklai, FUSE – virtualiajai failų sistemai. Disko talpykla įjungiama TorrServer žiniatinklio sąsajoje."
+  "Optional. The Cache and FUSE folders are created here: Cache for the TorrServer disk cache and FUSE for the virtual file system. The disk cache is switched on in the TorrServer web interface.": "Neprivaloma. Čia sukuriami aplankai Cache ir FUSE: Cache skirtas TorrServer disko talpyklai, FUSE – virtualiajai failų sistemai. Disko talpykla įjungiama TorrServer žiniatinklio sąsajoje.",
+  "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). The certificate source cannot be changed here while it is in use. To choose another source here, switch TorrServer back to its self-signed certificate on its page first.": "TorrServer naudoja sertifikatą, įkeltą jo paties tinklalapyje (Nustatymai, Papildomai, HTTPS). Kol jis naudojamas, sertifikato šaltinio čia pakeisti negalima. Norėdami čia pasirinkti kitą šaltinį, pirmiausia jo puslapyje perjunkite TorrServer atgal į savarankiškai pasirašytą sertifikatą."
 }
