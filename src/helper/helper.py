@@ -56,30 +56,15 @@ FUSE_FILE = os.path.join(PACKAGE_VAR, "torrserver.fuse")
 HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.https")
 HTTPS_PORT_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.port")
 FORCE_HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.force.https")
-SSL_MODE_FILE = os.path.join(PACKAGE_VAR, "torrserver.ssl.mode")
-SSL_CERT_FILE = os.path.join(PACKAGE_VAR, "torrserver.ssl.cert")
-SSL_KEY_FILE = os.path.join(PACKAGE_VAR, "torrserver.ssl.key")
 
 HELPER_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_LOGO_FILE = os.path.join(HELPER_DIR, "torrserver-status.png")
-
-# The pair certificate-helper copies here for "DSM" and "own files"; TorrServer
-# uses it when it is there and makes its own self-signed pair when it is not.
-SERVER_CERT_FILES = (os.path.join(PACKAGE_VAR, "server.pem"), os.path.join(PACKAGE_VAR, "server.key"))
-# Where TorrServer 146+ keeps a certificate uploaded on its own web page. While
-# it exists, TorrServer's saved settings point at it and it wins over server.pem.
-UPLOADED_CERT_FILE = os.path.join(PACKAGE_VAR, "ssl", "uploaded.crt")
-SSL_CERT_MODE_SELF = "self"
-SSL_CERT_MODE_DSM = "dsm"
-SSL_CERT_MODE_MANUAL = "manual"
 
 RESTART_SCRIPT = "/var/packages/TorrServer/scripts/restart-torrserver"
 RESTART_LOCK = os.path.join(PACKAGE_VAR, "restart.lock")
 RESTART_MIN_SECONDS = 3
 RESTART_GIVE_UP_SECONDS = 90
 RESTART_STATE = {"started": None}
-CERTIFICATE_HELPER = "/var/packages/TorrServer/scripts/certificate-helper"
-PREPARE_DIRECTORY = "/var/packages/TorrServer/scripts/prepare-directory"
 
 LOCALE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locales")
 LANGUAGE_FILE = os.path.join(PACKAGE_VAR, "helper.language")
@@ -712,147 +697,6 @@ def get_force_https():
     return read_file(FORCE_HTTPS_FILE, "0") == "1"
 
 
-def get_ssl_mode():
-    mode = read_file(SSL_MODE_FILE, SSL_CERT_MODE_SELF).strip().lower()
-    if mode not in (SSL_CERT_MODE_SELF, SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL):
-        return SSL_CERT_MODE_SELF
-    return mode
-
-
-def get_ssl_paths():
-    return read_file(SSL_CERT_FILE, "").strip(), read_file(SSL_KEY_FILE, "").strip()
-
-
-_PRIVILEGE_CACHE = {"time": 0.0, "value": False}
-PRIVILEGE_CACHE_SECONDS = 10
-
-
-# Must match the exit code prepare-directory uses for "no directory given".
-PREPARE_USAGE_EXIT = 64
-
-
-def sudo_denied(stderr):
-    """True when sudo itself refused (not the script it was asked to run).
-
-    Whatever the locale, sudo prefixes its own messages with "sudo:".
-    """
-    return "sudo:" in (stderr or "")
-
-
-PERMISSIONS_OUTDATED = (
-    "DSM permissions are missing or out of date. Run "
-    "/var/packages/TorrServer/scripts/setup-permissions as root in DSM Task "
-    "Scheduler (the permissions were extended in this version), then try again"
-)
-
-
-def has_privileged_access(use_cache=True):
-    """Return True when the package may run its root-only scripts.
-
-    Both scripts the Helper depends on are checked, because a sudoers rule
-    written by an older package version covers only some of them. Each check
-    spawns sudo, so the result is cached briefly (a page render asks several
-    times). prepare-directory is started without arguments, which makes it
-    print its usage text and do nothing; the restart script needs no root and is not probed.
-    """
-    now = time.monotonic()
-
-    if use_cache and now - _PRIVILEGE_CACHE["time"] < PRIVILEGE_CACHE_SECONDS:
-        return _PRIVILEGE_CACHE["value"]
-
-    value = False
-
-    if os.path.isfile(CERTIFICATE_HELPER) and os.path.isfile(PREPARE_DIRECTORY):
-        try:
-            certificates = subprocess.run(
-                ["/bin/sudo", "-n", CERTIFICATE_HELPER],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                timeout=5,
-            )
-            directories = subprocess.run(
-                ["/bin/sudo", "-n", PREPARE_DIRECTORY],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                timeout=5,
-            )
-            # sudo's own refusal exits with 1; prepare-directory without an
-            # argument exits with PREPARE_USAGE_EXIT. Warnings that sudo may
-            # print on stderr therefore cannot be mistaken for a refusal.
-            value = (
-                certificates.returncode == 0
-                and directories.returncode == PREPARE_USAGE_EXIT
-            )
-        except Exception:
-            value = False
-
-    _PRIVILEGE_CACHE["time"] = now
-    _PRIVILEGE_CACHE["value"] = value
-    return value
-
-
-def get_dsm_certificates():
-    try:
-        result = subprocess.run(
-            ["/bin/sudo", "-n", CERTIFICATE_HELPER],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=5,
-        )
-
-        if result.returncode != 0:
-            return []
-
-        data = json.loads(result.stdout)
-        result_items = []
-
-        for item in data:
-            subscriber = str(item.get("subscriber", "") or "").strip()
-            service = str(item.get("service", "") or "").strip()
-
-            for cert_item in item.get("certs", []):
-                cert = str(cert_item.get("cert", "") or "").strip()
-                chain = str(cert_item.get("chain", "") or "").strip()
-                key = str(cert_item.get("key", "") or "").strip()
-
-                if not cert or not key:
-                    continue
-
-                if "/ECC-" in cert:
-                    cert_type = "ECC"
-                elif "/RSA-" in cert:
-                    cert_type = "RSA"
-                else:
-                    cert_type = "Certificate"
-
-                label = subscriber or service or "DSM"
-
-                result_items.append({
-                    "label": "{} ({})".format(label, cert_type),
-                    "cert": chain or cert,
-                    "key": key,
-                })
-
-        unique = []
-        seen = set()
-
-        for item in result_items:
-            pair = (item["cert"], item["key"])
-            if pair in seen:
-                continue
-            seen.add(pair)
-            unique.append(item)
-
-        return sorted(unique, key=lambda item: item["label"].lower())
-
-    except Exception:
-        return []
-
 def is_torrserver_running():
     try:
         result = subprocess.run(
@@ -911,12 +755,23 @@ def get_torrserver_uptime():
         return "Unknown"
 
 
-NOT_WRITABLE = (
-    "The TorrServer service user cannot write to this folder. Give the TorrServer "
-    "user Read/Write permission on the shared folder (DSM Control Panel → Shared "
-    "Folder → Edit → Permissions → System internal user), or enable the optional "
-    "DSM permissions on the DSM permissions page."
-)
+# The message is built from three fixed sentences around the folder and the
+# share, so that each part has its own translation and the user sees which
+# shared folder needs the permission.
+NOT_WRITABLE_A = "The TorrServer service user cannot write to "
+NOT_WRITABLE_B = ". Give the TorrServer user Read/Write permission on the shared folder "
+NOT_WRITABLE_C = " (in DSM: Control Panel → Shared Folder → Edit → Permissions → System internal user)."
+
+
+def share_of(path):
+    """/volume1/docker/PlexTorr -> docker (the shared folder that holds it)."""
+    parts = [p for p in path.split("/") if p]
+    return parts[1] if len(parts) >= 2 else (parts[0] if parts else path)
+
+
+def not_writable_message(path):
+    return NOT_WRITABLE_A + path + NOT_WRITABLE_B + share_of(path) + NOT_WRITABLE_C
+
 
 SUBDIRECTORIES = ("Cache", "FUSE")
 
@@ -963,47 +818,15 @@ def prepare_torrserver_directory(torrserver_dir):
     if not torrserver_dir:
         return False, "Choose the TorrServer directory with the Browse button"
 
-    # Normal case: the user gave the service user access to the share (the
-    # usual DSM way), so no root is needed at all.
+    # The package runs as its own unprivileged user, so the share has to grant
+    # it access (the usual DSM way). No root is involved.
     try:
         if prepare_directory_directly(torrserver_dir):
             return True, ""
     except ValueError as e:
         return False, str(e)
 
-    # Otherwise ask the root helper, which needs the optional permissions.
-    if not has_privileged_access():
-        return False, NOT_WRITABLE
-
-    if not os.path.isfile(PREPARE_DIRECTORY):
-        return False, "Directory preparation script not found"
-
-    try:
-        result = subprocess.run(
-            [
-                "/bin/sudo",
-                "-n",
-                PREPARE_DIRECTORY,
-                torrserver_dir,
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            universal_newlines=True,
-            timeout=15,
-        )
-
-        if result.returncode != 0:
-            if sudo_denied(result.stderr):
-                return False, PERMISSIONS_OUTDATED
-
-            message = result.stderr.strip() or result.stdout.strip()
-            return False, message or "Failed to prepare TorrServer directory"
-
-        return True, ""
-
-    except Exception as e:
-        return False, str(e)
+    return False, not_writable_message(torrserver_dir)
 
 
 def restart_torrserver():
@@ -1334,14 +1157,6 @@ def valid_username(username):
     return bool(re.match(r"^[^:\x00-\x1f\x7f]{1,%d}$" % USERNAME_MAX_LENGTH, username))
 
 
-def valid_volume_path(path):
-    parts = path.split("/")
-    return (
-        bool(re.match(r"^/volume[0-9]+/[^\x00]+$", path))
-        and ".." not in parts
-    )
-
-
 def get_listening_tcp_ports():
     ports = set()
 
@@ -1402,35 +1217,12 @@ def save_settings(params):
     https = field("https", "0")
     https_port = field("https_port", "8091").strip()
     force_https = field("force_https", "0")
-    ssl_mode = field("ssl_mode", SSL_CERT_MODE_SELF).strip().lower()
-    ssl_cert = field("ssl_cert").strip()
-    ssl_key = field("ssl_key").strip()
-
-    # A certificate uploaded on TorrServer's own page is in charge: the source
-    # chosen here is not changed while it is in use.
-    cert_locked = uploaded_cert_active()
-    if cert_locked:
-        ssl_mode = get_ssl_mode()
-        ssl_cert, ssl_key = get_ssl_paths()
 
     old_port = get_port()
     old_https_port = get_https_port()
     saved_username, saved_password = get_saved_account()
 
     # ---- 1. Validate everything first; nothing is changed until all pass.
-
-    if ssl_mode not in (SSL_CERT_MODE_SELF, SSL_CERT_MODE_DSM, SSL_CERT_MODE_MANUAL):
-        return False, "Invalid certificate mode"
-
-    # New own-path setups are made on TorrServer's page; only an installation
-    # that already uses them keeps the option.
-    if ssl_mode == SSL_CERT_MODE_MANUAL and get_ssl_mode() != SSL_CERT_MODE_MANUAL and not cert_locked:
-        return False, "Invalid certificate mode"
-
-    # Everything else works without root. Only certificates that have to be
-    # copied from DSM (or from a root-readable path) need the optional rule.
-    if not cert_locked and ssl_mode != SSL_CERT_MODE_SELF and not has_privileged_access():
-        return False, "Additional DSM permissions are required for DSM and manual certificates."
 
     # The directory is optional: without one TorrServer keeps its data in the
     # package folder. Only FUSE needs a place to mount.
@@ -1446,17 +1238,6 @@ def save_settings(params):
 
         if cache_browser_path(torrserver_dir) != torrserver_dir:
             return False, "Invalid TorrServer directory"
-
-    if not cert_locked and ssl_mode == SSL_CERT_MODE_MANUAL:
-        if not ssl_cert or not ssl_key:
-            return False, "Certificate and key paths are required"
-        if not valid_volume_path(ssl_cert) or not valid_volume_path(ssl_key):
-            return False, "Manual certificate and key must be inside /volumeX/"
-
-    if not cert_locked and ssl_mode == SSL_CERT_MODE_DSM:
-        valid = {(x["cert"], x["key"]) for x in get_dsm_certificates()}
-        if (ssl_cert, ssl_key) not in valid:
-            return False, "Invalid DSM certificate selection"
 
     port_number, error = parse_port(port, WEB_PORT_ERRORS)
     if port_number is None:
@@ -1512,8 +1293,6 @@ def save_settings(params):
         if status == "error":
             return False, cache_message
 
-    previous_ssl_mode = get_ssl_mode()
-
     try:
         if auth == "1":
             save_account(username, password, saved_username)
@@ -1525,18 +1304,6 @@ def save_settings(params):
         write_file(HTTPS_PORT_FILE, str(https_port_number))
         write_file(HTTPS_FILE, "1" if https == "1" else "0")
         write_file(FORCE_HTTPS_FILE, "1" if force_https == "1" and https == "1" else "0")
-        write_file(SSL_MODE_FILE, ssl_mode)
-        write_file(SSL_CERT_FILE, ssl_cert)
-        write_file(SSL_KEY_FILE, ssl_key)
-
-        # Back to TorrServer's own certificate: drop the copied DSM / own
-        # pair, or TorrServer keeps serving it.
-        if ssl_mode == SSL_CERT_MODE_SELF and previous_ssl_mode != SSL_CERT_MODE_SELF:
-            for path in SERVER_CERT_FILES:
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
     except OSError as e:
         return False, "Unable to write settings: {}".format(e)
 
@@ -1771,37 +1538,30 @@ button.danger:disabled,
     }}
 }}
 
-.permission-help {{
-    margin: 10px 0;
-}}
-
-.permission-help summary {{
-    cursor: pointer;
-    font-weight: 600;
-    color: #30415e;
-    margin-bottom: 8px;
-}}
-
-.permission-help pre {{
-    min-height: 0;
-    padding: 10px 12px;
-    margin: 8px 0;
+.browse-denied {{
+    float: right;
+    padding: 1px 9px;
+    border-radius: 10px;
+    background: #fef3c7;
+    color: #92400e;
     font-size: 12px;
+    font-weight: 600;
 }}
 
-.permission-help .notice {{
-    margin: 8px 0;
+.ssl-manual h4 {{
+    margin: 16px 0 6px;
+    font-size: 14px;
 }}
 
-.cert-fields {{
-    border: 0;
-    margin: 0;
-    padding: 0;
-    min-width: 0;
+.ssl-manual p {{
+    margin: 6px 0;
+    line-height: 1.5;
 }}
 
-.cert-fields[disabled] {{
-    display: none;
+.ssl-manual pre {{
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-x: auto;
 }}
 
 .stopped-info {{
@@ -2761,70 +2521,48 @@ AUTH_CARD = """
 """
 
 
-def manual_option(ssl_mode, privileged):
-    """Own certificate paths are set on TorrServer's page now; the option stays
-    only for an installation that already uses it."""
-    if ssl_mode != SSL_CERT_MODE_MANUAL:
-        return ""
-    return '<option value="manual" selected {}>Manual paths</option>'.format("" if privileged else "disabled")
+SSL_SCRIPT = """#!/bin/sh
+ARCHIVE=/usr/syno/etc/certificate/_archive
+ID=$(cat "$ARCHIVE/DEFAULT")
+DEST=/volume1/certs
 
-
-UPLOADED_CERT_NOTICE = (
-    "TorrServer is using a certificate uploaded on its own web page (Settings, Additional, HTTPS). "
-    "The certificate source cannot be changed here while it is in use. To choose another source here, "
-    "switch TorrServer back to its self-signed certificate on its page first."
-)
-
-
-def uploaded_cert_active():
-    return os.path.isfile(UPLOADED_CERT_FILE)
-
-
-def uploaded_cert_notice():
-    if not uploaded_cert_active():
-        return ""
-    return '<div class="notice">{}</div>'.format(UPLOADED_CERT_NOTICE)
-
-
-def permissions_block(privileged):
-    """The DSM permissions help inside the certificate card (no extra window)."""
-    if privileged:
-        return """
-        <div class="status-running">Extended DSM permissions are configured.</div>
+mkdir -p "$DEST"
+for f in fullchain.pem privkey.pem; do
+    cp "$ARCHIVE/$ID/$f" "$DEST/$f.tmp"
+    chown TorrServer "$DEST/$f.tmp"
+    chmod 600 "$DEST/$f.tmp"
+    mv "$DEST/$f.tmp" "$DEST/$f"
+done
 """
 
-    return """
-        <div class="help">
-            Extended DSM permissions are not configured. TorrServer itself continues to work, but DSM and manual certificates cannot be synchronized.
-        </div>
+# Information only: nothing here is a form field. Every paragraph is a single
+# line so that it is found as one key in the locale files.
+SSL_CARD = """
+<div class="settings-card">
+    <div class="settings-card-title">
+        <span class="metric-icon" data-icon="shield"></span>
+        <span>SSL Certificate</span>
+    </div>
+    <div class="settings-card-body ssl-manual">
 
-        <details class="permission-help">
-            <summary>DSM permissions</summary>
+        <p>The HTTPS certificate is set on the TorrServer web page. The package runs with the limited rights that DSM gives it, so it does not read or copy DSM certificates itself.</p>
 
-            <div class="help">
-                TorrServer works without additional privileges. Root access is only required for DSM and manual certificate synchronization and for folders that TorrServer cannot write to.
-            </div>
+        <h4>Manual upload</h4>
+        <p>Turn on HTTPS above, then save and restart. Open the TorrServer web page, go to Settings, Additional, HTTPS and upload the certificate and the key.</p>
+        <p>A certificate uploaded this way is not renewed by itself. Upload it again after each renewal, or use one of the two options below.</p>
 
-            <div class="notice">
-                <strong>One-time setup</strong><br>
-                Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:
-            </div>
+        <h4>Option 1: reverse proxy (recommended)</h4>
+        <p>Create a reverse proxy rule in DSM for the TorrServer port and assign your certificate to it in the DSM certificate settings. DSM renews the certificate by itself, and HTTPS can stay off in TorrServer.</p>
 
-            <pre>/var/packages/TorrServer/scripts/setup-permissions</pre>
+        <h4>Option 2: Task Scheduler</h4>
+        <p>Create a Task Scheduler task of the type User-defined script. Run it as root, repeat it daily and use this script. It copies the DSM certificate to a folder of your choice and gives the TorrServer user access to it:</p>
+        <pre translate="no">__SCRIPT__</pre>
+        <p>Then set the certificate and the key on the TorrServer web page to the two files in that folder. TorrServer re-reads them, so a renewed certificate is picked up without a restart.</p>
+        <p>If your certificate is for a domain and is not the default one, put its ID into the script. The IDs are the folder names in /usr/syno/etc/certificate/_archive.</p>
 
-            <div class="help">
-                After the task finishes, return to TorrServer Settings and click Check permissions.
-            </div>
-
-            <div class="help">
-                Instead, DSM can provide HTTPS with its own certificate through a reverse proxy rule for the TorrServer port. TorrServer HTTPS can then stay off.
-            </div>
-        </details>
-
-        <div style="margin-top:10px">
-            <button type="button" class="secondary" onclick="window.location.reload()">Check permissions</button>
-        </div>
-"""
+    </div>
+</div>
+""".replace("__SCRIPT__", html.escape(SSL_SCRIPT.strip("\n")))
 
 
 def settings_page(message="", torrserver_dir_override=""):
@@ -2835,11 +2573,7 @@ def settings_page(message="", torrserver_dir_override=""):
     https = get_https_enabled()
     https_port = get_https_port()
     force_https = get_force_https()
-    ssl_mode = get_ssl_mode()
-    ssl_cert, ssl_key = get_ssl_paths()
     saved_username, saved_password = get_saved_account()
-    privileged = has_privileged_access()
-    dsm_certs = get_dsm_certificates() if privileged else []
 
     body = page_header("TorrServer Settings")
 
@@ -2855,12 +2589,9 @@ def settings_page(message="", torrserver_dir_override=""):
 {language_selector}
 
 <div class="notice">
-<strong>After changing settings:</strong> first click <b>Save</b>.
-<br>
-{}
+To apply changes, click <b>Save</b>, then <b>Restart</b>.
 </div>
 """.format(
-        "Some changes require a restart of the TorrServer service to take effect.",
         sidebar=app_sidebar("settings"),
         language_selector=language_selector(),
     )
@@ -2966,54 +2697,6 @@ def settings_page(message="", torrserver_dir_override=""):
     </div>
 </div>
 
-<div class="settings-card">
-    <div class="settings-card-title">
-        <span class="metric-icon" data-icon="shield"></span>
-        <span>SSL Certificate</span>
-    </div>
-    <div class="settings-card-body">
-
-        {uploaded_cert}
-
-        <fieldset class="cert-fields" {cert_locked}>
-        <div class="form-row">
-            <label for="sslMode">Certificate source</label>
-            <select name="ssl_mode" id="sslMode" onchange="toggleSslMode()">
-                <option value="self" {}>TorrServer self-signed</option>
-                <option value="dsm" {} {}>DSM certificate</option>
-                {}
-            </select>
-        </div>
-
-        <div id="dsmCertificateFields" class="form-row">
-            <label for="sslDsm">DSM certificate</label>
-            <select id="sslDsm">
-                {}
-            </select>
-        </div>
-
-        <div id="manualCertificateFields">
-            <div class="form-row">
-                <label for="sslCert">SSL Certificate path</label>
-                <input id="sslCert" type="text" name="ssl_cert" value="{}" placeholder="/volume1/.../fullchain.pem">
-            </div>
-
-            <div class="form-row">
-                <label for="sslKey">SSL Key path</label>
-                <input id="sslKey" type="text" name="ssl_key" value="{}" placeholder="/volume1/.../privkey.pem">
-            </div>
-        </div>
-
-        <div class="help">
-            The selected source will be synchronized to TorrServer server.pem/server.key.
-        </div>
-        </fieldset>
-
-        {permissions}
-
-    </div>
-</div>
-
 <div class="settings-card save-bar">
     <div class="actions">
         <button type="submit">Save</button>
@@ -3023,41 +2706,14 @@ def settings_page(message="", torrserver_dir_override=""):
 
 </fieldset>
 </form>
+
+{ssl_card}
 </div>
 
 <script>
 function toggleHttps() {{
     var enabled = document.querySelector('input[name="https"]').checked;
     document.getElementById('httpsPort').disabled = !enabled;
-    document.getElementById('sslMode').disabled = !enabled;
-    document.getElementById('sslDsm').disabled = !enabled;
-    document.getElementById('sslCert').disabled = !enabled;
-    document.getElementById('sslKey').disabled = !enabled;
-}}
-
-function toggleSslMode() {{
-    var mode = document.getElementById('sslMode').value;
-    document.getElementById('dsmCertificateFields').style.display =
-        mode === 'dsm' ? 'grid' : 'none';
-    document.getElementById('manualCertificateFields').style.display =
-        mode === 'manual' ? 'block' : 'none';
-}}
-
-function syncDsmCertificate() {{
-    var selected = document.getElementById('sslDsm');
-    if (!selected || !selected.value) return;
-
-    var value = selected.value.split('|');
-    if (value.length === 2) {{
-        document.querySelector('input[name="ssl_cert"]').value = value[0];
-        document.querySelector('input[name="ssl_key"]').value = value[1];
-    }}
-}}
-
-document.getElementById('sslDsm').addEventListener('change', syncDsmCertificate);
-
-if (document.getElementById('sslDsm').value) {{
-    syncDsmCertificate();
 }}
 
 function toggleAuth() {{
@@ -3100,7 +2756,6 @@ if (passwordField) {{
 }}
 
 toggleHttps();
-toggleSslMode();
 toggleAuth();
 toggleFuseHint();
 </script>
@@ -3115,24 +2770,7 @@ toggleFuseHint();
         https_port,
         "checked" if force_https else "",
         "" if https else "disabled",
-        "selected" if ssl_mode == SSL_CERT_MODE_SELF else "",
-        "selected" if ssl_mode == SSL_CERT_MODE_DSM else "",
-        "disabled" if not privileged else "",
-        manual_option(ssl_mode, privileged),
-        "".join(
-            '<option value="{}|{}" {}>{}</option>'.format(
-                html.escape(item["cert"], quote=True),
-                html.escape(item["key"], quote=True),
-                "selected" if (item["cert"], item["key"]) == (ssl_cert, ssl_key) else "",
-                html.escape(item["label"])
-            )
-            for item in dsm_certs
-        ),
-        html.escape(ssl_cert, quote=True),
-        html.escape(ssl_key, quote=True),
-        permissions=permissions_block(privileged),
-        uploaded_cert=uploaded_cert_notice(),
-        cert_locked="disabled" if uploaded_cert_active() else "",
+        ssl_card=SSL_CARD,
         auth_card=AUTH_CARD.format(
             "checked" if auth else "",
             html.escape(saved_username, quote=True),
@@ -3198,11 +2836,14 @@ def cache_browser_page(path, target="cache"):
     rows = []
     for name in names:
         child = os.path.join(path, name) if path != "/" else os.path.join("/", name)
-        label = html.escape(name)
+        # Folder names are the user's own text and are never translated.
+        label = '<span translate="no">{}/</span>'.format(html.escape(name))
+        if path != "/" and not os.access(child, os.W_OK | os.X_OK):
+            label += ' <span class="browse-denied">no write access</span>'
         rows.append(
             '<div style="margin:6px 0;">'
             '<a class="button secondary" style="width:100%;box-sizing:border-box;text-align:left;" '
-            'href="./browse?path={}&target={}">{}/</a>'
+            'href="./browse?path={}&target={}">{}</a>'
             '</div>'.format(
                 quote(child, safe=""),
                 quote(target, safe=""),
@@ -3230,11 +2871,24 @@ def cache_browser_page(path, target="cache"):
         select_href = "./settings?cache_path={}".format(quote(path, safe=""))
         page_title = "Select cache directory"
 
+    # A folder the TorrServer user cannot write to is chosen anyway only by
+    # mistake: say so here, before Save, and name the shared folder to fix.
+    warning = ""
+    if path != "/" and not os.access(path, os.W_OK | os.X_OK):
+        warning = '<div class="notice">{}{}{}{}{}</div>'.format(
+            NOT_WRITABLE_A,
+            '<span translate="no">{}</span>'.format(html.escape(path)),
+            NOT_WRITABLE_B,
+            '<span translate="no">{}</span>'.format(html.escape(share_of(path))),
+            NOT_WRITABLE_C,
+        )
+
     body = page_header(page_title)
     body += """
 <div class="card">
 <h1>{}</h1>
 <p><b>Current:</b> <code>{}</code></p>
+{warning}
 <div style="margin-bottom:15px;">
 {}
 </div>
@@ -3251,6 +2905,7 @@ def cache_browser_page(path, target="cache"):
         parent_html,
         select_href,
         "".join(rows),
+        warning=warning,
     )
 
     body += page_footer()

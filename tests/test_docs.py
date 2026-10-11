@@ -60,15 +60,14 @@ class ReadmeTests(unittest.TestCase):
         for link in re.findall(r"\]\(#([\w-]+)\)", README):
             self.assertIn(link, anchors, "broken link #" + link)
 
-    def test_permission_instruction_matches_what_the_helper_tells_users(self):
+    def test_folder_permission_instruction_matches_what_the_helper_tells_users(self):
         os.environ.setdefault("TORRSERVER_DSM_VAR", tempfile.mkdtemp(prefix="docs-var-"))
         spec = importlib.util.spec_from_file_location(
             "helper_docs", os.path.join(ROOT, "src", "helper", "helper.py"))
         helper = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(helper)
-        self.assertIn(helper.PREPARE_DIRECTORY.rsplit("/", 1)[0] + "/setup-permissions", README)
         self.assertIn("System internal user", README)
-        self.assertIn("System internal user", helper.NOT_WRITABLE)
+        self.assertIn("System internal user", helper.NOT_WRITABLE_C)
 
     def test_sections_a_user_needs_are_top_level(self):
         top_level = re.findall(r"^## (.+)$", README, re.M)

@@ -2,6 +2,7 @@
 
 Run:  python3 -m unittest discover -s tests -v
 """
+import html
 import importlib.util
 import json
 import os
@@ -85,7 +86,6 @@ class Base(unittest.TestCase):
             shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
         # Deterministic, closed HTTPS port so only the HTTP endpoint matters.
         h.write_file(h.HTTPS_PORT_FILE, str(free_port()))
-        h._PRIVILEGE_CACHE["time"] = 0.0
 
 
 class CachePathTests(Base):
@@ -176,24 +176,16 @@ class AccountTests(Base):
         self.assertFalse(h.valid_username("a\nb"))
         self.assertFalse(h.valid_username(""))
 
-    def test_volume_path_validation(self):
-        self.assertTrue(h.valid_volume_path("/volume1/certs/a.pem"))
-        self.assertFalse(h.valid_volume_path("/volume1/../etc/shadow"))
-        self.assertFalse(h.valid_volume_path("/etc/shadow"))
-
-
 class SaveSettingsTests(Base):
     BASE = dict(port="8090", torrserver_dir="/volume1/TS", https="0",
-                https_port="8091", ssl_mode="self", auth="0")
+                https_port="8091", auth="0")
 
     def setUp(self):
         super().setUp()
         self.ts = FakeTorrServer()
         self.addCleanup(self.ts.close)
         self.patches = {
-            "has_privileged_access": lambda use_cache=True: True,
             "prepare_torrserver_directory": lambda d: (True, ""),
-            "get_dsm_certificates": lambda: [],
             "cache_browser_path": lambda p: p,
             "is_port_in_use": lambda n, allowed_ports=None: False,
             "get_port": lambda: self.ts.port,
@@ -219,7 +211,6 @@ class SaveSettingsTests(Base):
             dict(auth="1", username="a:b", password="x"),
             dict(auth="1", username="u", password=""),
             dict(port="80"),
-            dict(ssl_mode="manual", ssl_cert="/volume1/../etc/shadow", ssl_key="/volume1/k"),
         ]
         h.os.unlink(h.HTTPS_PORT_FILE)
         for case in cases:
@@ -245,15 +236,7 @@ class SaveSettingsTests(Base):
         self.assertTrue(self.save()[0])
         self.assertFalse(self.save(https="1")[0])
 
-    def test_settings_save_without_any_extra_permissions(self):
-        """The common case: no sudo rule, self-signed certificate."""
-        h.has_privileged_access = lambda use_cache=True: False
-        ok, message = self.save()
-        self.assertTrue(ok, message)
-        self.assertEqual(h.read_file(h.PORT_FILE), "8090")
-
-    def test_every_non_certificate_option_saves_without_permissions(self):
-        h.has_privileged_access = lambda use_cache=True: False
+    def test_every_option_saves_without_any_extra_permissions(self):
         ok, message = self.save(port="9090", https="1", https_port="9443", force_https="1",
                                 fuse="1", auth="1", username="alice", password="pw")
         self.assertTrue(ok, message)
@@ -261,82 +244,25 @@ class SaveSettingsTests(Base):
         self.assertEqual(h.read_file(h.FUSE_FILE), "1")
         self.assertEqual(json.load(open(h.ACCS_FILE)), {"alice": "pw"})
 
-    def test_dsm_and_manual_certificates_need_the_optional_permissions(self):
-        h.has_privileged_access = lambda use_cache=True: False
-        h.get_dsm_certificates = lambda: [{"cert": "/usr/syno/c.pem", "key": "/usr/syno/k.pem", "label": "x"}]
-        open(h.SSL_MODE_FILE, "w").write("manual")  # an installation that already uses own paths
-        for mode, cert, key in (("dsm", "/usr/syno/c.pem", "/usr/syno/k.pem"),
-                                ("manual", "/volume1/c.pem", "/volume1/k.pem")):
-            ok, message = self.save(ssl_mode=mode, ssl_cert=cert, ssl_key=key)
-            self.assertFalse(ok, mode)
-            self.assertIn("DSM permissions", message)
-        self.assertFalse(os.path.exists(h.PORT_FILE), "nothing may be written")
-
-    def test_certificates_work_once_permissions_exist(self):
-        h.has_privileged_access = lambda use_cache=True: True
-        open(h.SSL_MODE_FILE, "w").write("manual")
-        ok, message = self.save(ssl_mode="manual", ssl_cert="/volume1/c.pem", ssl_key="/volume1/k.pem")
+    def test_certificate_fields_of_an_old_form_are_ignored(self):
+        ok, message = self.save(ssl_mode="dsm", ssl_cert="/usr/syno/c.pem", ssl_key="/usr/syno/k.pem")
         self.assertTrue(ok, message)
+        self.assertEqual(sorted(os.listdir(VAR)), sorted(os.path.basename(f) for f in (
+            h.PORT_FILE, h.TORRSERVER_DIR_FILE, h.AUTH_FILE, h.FUSE_FILE, h.HTTPS_PORT_FILE,
+            h.HTTPS_FILE, h.FORCE_HTTPS_FILE)))
 
-    def test_own_paths_cannot_be_chosen_any_more_but_an_existing_setup_keeps_working(self):
-        # own certificates are set on TorrServer's page now
-        ok, message = self.save(ssl_mode="manual", ssl_cert="/volume1/c.pem", ssl_key="/volume1/k.pem")
-        self.assertEqual((ok, message), (False, "Invalid certificate mode"))
-        self.assertNotIn('value="manual"', h.settings_page())
-        open(h.SSL_MODE_FILE, "w").write("manual")
-        self.assertIn('<option value="manual" selected', h.settings_page())
-
-    def test_back_to_the_self_signed_certificate_removes_the_copied_pair(self):
-        for path in h.SERVER_CERT_FILES:
-            open(path, "w").write("copied from DSM")
-        open(h.SSL_MODE_FILE, "w").write("dsm")
-        ok, message = self.save(ssl_mode="self")
+    def test_saving_never_touches_a_certificate_pair(self):
+        for name in ("server.pem", "server.key"):
+            open(os.path.join(VAR, name), "w").write("user supplied")
+        ok, message = self.save(https="1")
         self.assertTrue(ok, message)
-        for path in h.SERVER_CERT_FILES:
-            self.assertFalse(os.path.exists(path), path)
-
-    def test_saving_self_signed_again_leaves_torrservers_own_pair_alone(self):
-        for path in h.SERVER_CERT_FILES:
-            open(path, "w").write("made by TorrServer")
-        open(h.SSL_MODE_FILE, "w").write("self")
-        ok, message = self.save(ssl_mode="self")
-        self.assertTrue(ok, message)
-        for path in h.SERVER_CERT_FILES:
-            self.assertTrue(os.path.exists(path), path)
-
-    def test_certificate_uploaded_in_torrservers_page_is_announced(self):
-        self.assertNotIn(h.UPLOADED_CERT_NOTICE, h.settings_page())
-        os.makedirs(os.path.dirname(h.UPLOADED_CERT_FILE), exist_ok=True)
-        open(h.UPLOADED_CERT_FILE, "w").write("x")
-        page = h.settings_page()
-        self.assertIn(h.UPLOADED_CERT_NOTICE, page)
-        self.assertNotIn(h.UPLOADED_CERT_FILE, page)
-
-    def test_certificate_source_is_locked_while_torrservers_upload_is_in_use(self):
-        open(h.SSL_MODE_FILE, "w").write("dsm")
-        open(h.SSL_CERT_FILE, "w").write("/usr/syno/c.pem")
-        open(h.SSL_KEY_FILE, "w").write("/usr/syno/k.pem")
-        os.makedirs(os.path.dirname(h.UPLOADED_CERT_FILE), exist_ok=True)
-        open(h.UPLOADED_CERT_FILE, "w").write("x")
-        for path in h.SERVER_CERT_FILES:
-            open(path, "w").write("copied from DSM")
-        self.assertIn('<fieldset class="cert-fields" disabled>', h.settings_page())
-        # a disabled form control is not sent, so the save sees the default "self"
-        ok, message = self.save(ssl_mode="self", ssl_cert="", ssl_key="")
-        self.assertTrue(ok, message)
-        self.assertEqual(h.get_ssl_mode(), "dsm", "the saved source must not change")
-        self.assertEqual(open(h.SSL_CERT_FILE).read(), "/usr/syno/c.pem")
-        for path in h.SERVER_CERT_FILES:
-            self.assertTrue(os.path.exists(path), "nothing is deleted while the upload is in use")
-
-    def test_source_can_be_chosen_again_after_the_upload_is_gone(self):
-        self.assertIn('<fieldset class="cert-fields" >', h.settings_page())
+        for name in ("server.pem", "server.key"):
+            self.assertEqual(open(os.path.join(VAR, name)).read(), "user supplied")
 
     def test_a_directory_the_service_user_cannot_write_is_explained(self):
-        h.has_privileged_access = lambda use_cache=True: False
-        h.prepare_torrserver_directory = lambda d: (False, h.NOT_WRITABLE)
+        h.prepare_torrserver_directory = lambda d: (False, h.not_writable_message(d))
         ok, message = self.save()
-        self.assertEqual((ok, message), (False, h.NOT_WRITABLE))
+        self.assertEqual((ok, message), (False, h.not_writable_message("/volume1/TS")))
         self.assertFalse(os.path.exists(h.PORT_FILE))
 
     def test_saves_when_torrserver_is_down(self):
@@ -347,149 +273,35 @@ class SaveSettingsTests(Base):
         self.assertEqual(h.read_file(h.CACHE_PENDING_FILE), "/volume1/TS/Cache")
 
 
-class PrivilegeTests(Base):
-    """The Helper must notice a sudoers rule that covers only some scripts."""
-
-    DENIED = "sudo: a password is required\n"
-    USAGE = 64   # prepare-directory's exit code for "no directory given"
-
-    def setUp(self):
-        super().setUp()
-        self.calls = []
-        self.real_run, self.real_isfile = h.subprocess.run, os.path.isfile
-        self.addCleanup(lambda: (setattr(h.subprocess, "run", self.real_run),
-                                 setattr(os.path, "isfile", self.real_isfile)))
-        os.path.isfile = lambda p: True
-
-    def fake_sudo(self, cert=(0, ""), prepare=(64, "")):
-        def run(cmd, **kwargs):
-            self.calls.append(cmd)
-            rc, err = cert if cmd[-1] == h.CERTIFICATE_HELPER else prepare
-            return type("R", (), {"returncode": rc, "stderr": err, "stdout": ""})()
-        h.subprocess.run = run
-
-    def test_exit_code_matches_the_script(self):
-        script = open(os.path.join(ROOT, "src", "scripts", "prepare-directory")).read()
-        self.assertEqual(h.PREPARE_USAGE_EXIT, self.USAGE)
-        self.assertIn("exit %d" % self.USAGE, script)
-
-    def test_fully_configured(self):
-        self.fake_sudo(cert=(0, ""), prepare=(self.USAGE, ""))
-        self.assertTrue(h.has_privileged_access(use_cache=False))
-
-    def test_old_rule_without_prepare_directory_is_detected(self):
-        """The reported case: certificate-helper is allowed, prepare-directory is not."""
-        self.fake_sudo(cert=(0, ""), prepare=(1, self.DENIED))
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-
-    def test_no_rule_at_all(self):
-        self.fake_sudo(cert=(1, self.DENIED), prepare=(1, self.DENIED))
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-
-    def test_certificate_helper_denied_only(self):
-        self.fake_sudo(cert=(1, "sudo: sorry, you are not allowed\n"), prepare=(self.USAGE, ""))
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-
-    def test_harmless_sudo_warnings_do_not_lock_the_helper(self):
-        """sudo may print notices on stderr even when it runs the command."""
-        warning = "sudo: unable to resolve host SYNONAS\n"
-        self.fake_sudo(cert=(0, warning), prepare=(self.USAGE, warning))
-        self.assertTrue(h.has_privileged_access(use_cache=False))
-
-    def test_localized_refusal_is_still_a_refusal(self):
-        self.fake_sudo(cert=(0, ""), prepare=(1, "sudo: требуется пароль\n"))
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-
-    def test_unexpected_exit_code_is_not_trusted(self):
-        self.fake_sudo(cert=(0, ""), prepare=(1, ""))      # e.g. an old script version
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-        self.fake_sudo(cert=(0, ""), prepare=(0, ""))
-        self.assertFalse(h.has_privileged_access(use_cache=False))
-
-    def test_the_check_never_prompts_and_never_restarts(self):
-        self.fake_sudo()
-        h.has_privileged_access(use_cache=False)
-        self.assertTrue(all(h.RESTART_SCRIPT not in cmd for cmd in self.calls))
-        self.assertTrue(all("-n" in cmd for cmd in self.calls), "sudo must never prompt")
-
-    def test_result_is_cached(self):
-        self.fake_sudo()
-        h._PRIVILEGE_CACHE["time"] = 0.0
-        h.has_privileged_access()
-        count = len(self.calls)
-        h.has_privileged_access()
-        self.assertEqual(len(self.calls), count)
-
-    def patch(self, name, value):
-        old = getattr(h, name)
-        setattr(h, name, value)
-        self.addCleanup(setattr, h, name, old)
-
-    def test_raw_sudo_error_becomes_actionable_message(self):
-        self.patch("prepare_directory_directly", lambda d: False)     # service user cannot write
-        self.patch("has_privileged_access", lambda use_cache=True: True)
-        self.fake_sudo(prepare=(1, self.DENIED))
-        ok, message = h.prepare_torrserver_directory("/volume1/TS")
-        self.assertFalse(ok)
-        self.assertNotIn("a password is required", message)
-        self.assertIn("setup-permissions", message)
-
-    def test_real_script_errors_are_passed_through(self):
-        self.patch("prepare_directory_directly", lambda d: False)
-        self.patch("has_privileged_access", lambda use_cache=True: True)
-        self.fake_sudo(prepare=(1, "Invalid TorrServer directory.\n"))
-        self.assertEqual(h.prepare_torrserver_directory("/etc"), (False, "Invalid TorrServer directory."))
-
-    def test_empty_directory_tells_the_user_what_to_do(self):
-        self.fake_sudo()
-        ok, message = h.prepare_torrserver_directory("")
-        self.assertFalse(ok)
-        self.assertIn("Browse", message)
-
-
 class DirectoryTests(Base):
-    """Cache/FUSE are created as the service user; root is only a fallback."""
+    """Cache/FUSE are created as the service user. There is no root fallback."""
 
     def setUp(self):
         super().setUp()
         self.base = tempfile.mkdtemp(prefix="ts-dir-")
         self.addCleanup(shutil.rmtree, self.base, True)
         self.sudo_calls = []
-        self.privileged = False
-        self.real = (h.subprocess.run, h.has_privileged_access, os.mkdir, os.access)
-        h.has_privileged_access = lambda use_cache=True: self.privileged
-        # The helper checks that the root script exists. Do not rely on the
-        # machine running the tests having the package installed.
-        tools = tempfile.mkdtemp(prefix="ts-tools-")
-        self.addCleanup(shutil.rmtree, tools, True)
-        self.script = os.path.join(tools, "prepare-directory")
-        with open(self.script, "w") as f:
-            f.write("#!/bin/sh\n")
-        os.chmod(self.script, 0o755)
-        self.real_script = h.PREPARE_DIRECTORY
-        h.PREPARE_DIRECTORY = self.script
-        self.addCleanup(setattr, h, "PREPARE_DIRECTORY", self.real_script)
+        self.real = (h.subprocess.run, os.mkdir, os.access)
 
         def run(cmd, **kwargs):
             self.sudo_calls.append(cmd)
             return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
         h.subprocess.run = run
         self.addCleanup(lambda: (setattr(h.subprocess, "run", self.real[0]),
-                                 setattr(h, "has_privileged_access", self.real[1]),
-                                 setattr(os, "mkdir", self.real[2]),
-                                 setattr(os, "access", self.real[3])))
+                                 setattr(os, "mkdir", self.real[1]),
+                                 setattr(os, "access", self.real[2])))
 
     def deny_creation(self):
         def mkdir(path, mode=0o777, **kw):
             raise PermissionError(13, "Permission denied", path)
         os.mkdir = mkdir
 
-    def test_no_root_needed_when_the_service_user_can_write(self):
+    def test_the_service_user_creates_the_folders(self):
         ok, message = h.prepare_torrserver_directory(self.base)
         self.assertEqual((ok, message), (True, ""))
         for name in ("Cache", "FUSE"):
             self.assertTrue(os.path.isdir(os.path.join(self.base, name)), name)
-        self.assertEqual(self.sudo_calls, [], "sudo must not be involved")
+        self.assertEqual(self.sudo_calls, [], "no other program is started")
 
     def test_existing_writable_directories_are_accepted(self):
         for name in ("Cache", "FUSE"):
@@ -497,44 +309,28 @@ class DirectoryTests(Base):
         self.assertEqual(h.prepare_torrserver_directory(self.base), (True, ""))
         self.assertEqual(self.sudo_calls, [])
 
-    def test_not_writable_without_permissions_explains_the_standard_dsm_fix(self):
+    def test_not_writable_explains_the_standard_dsm_fix(self):
         self.deny_creation()
         ok, message = h.prepare_torrserver_directory(self.base)
         self.assertFalse(ok)
-        self.assertEqual(message, h.NOT_WRITABLE)
+        self.assertEqual(message, h.not_writable_message(self.base))
+        self.assertIn(self.base, message, "the message names the folder")
         self.assertIn("System internal user", message)
-        self.assertEqual(self.sudo_calls, [], "never call sudo when it is not configured")
+        self.assertNotIn("setup-permissions", message)
+        self.assertEqual(self.sudo_calls, [], "never call sudo")
 
-    def test_not_writable_with_permissions_falls_back_to_root(self):
-        self.deny_creation()
-        self.privileged = True
-        ok, _ = h.prepare_torrserver_directory(self.base)
-        self.assertTrue(ok)
-        (cmd,) = self.sudo_calls
-        self.assertEqual(cmd, ["/bin/sudo", "-n", self.script, self.base])
-
-    def test_missing_root_script_is_reported_without_calling_sudo(self):
-        self.deny_creation()
-        self.privileged = True
-        os.unlink(self.script)
-        ok, message = h.prepare_torrserver_directory(self.base)
-        self.assertFalse(ok)
-        self.assertEqual(message, "Directory preparation script not found")
-        self.assertEqual(self.sudo_calls, [])
-
-    def test_existing_directory_that_is_not_writable_needs_root(self):
+    def test_existing_directory_that_is_not_writable_is_explained(self):
         for name in ("Cache", "FUSE"):
             os.mkdir(os.path.join(self.base, name))
         os.access = lambda path, mode: False
-        self.assertEqual(h.prepare_torrserver_directory(self.base), (False, h.NOT_WRITABLE))
+        self.assertEqual(h.prepare_torrserver_directory(self.base), (False, h.not_writable_message(self.base)))
+        self.assertEqual(self.sudo_calls, [])
 
-    def test_symlinks_are_refused_even_with_root_available(self):
-        self.privileged = True
+    def test_symlinks_are_refused(self):
         os.symlink("/etc", os.path.join(self.base, "Cache"))
         ok, message = h.prepare_torrserver_directory(self.base)
         self.assertFalse(ok)
         self.assertIn("symbolic link", message)
-        self.assertEqual(self.sudo_calls, [])
 
     def test_a_file_where_a_directory_belongs_is_refused(self):
         open(os.path.join(self.base, "FUSE"), "w").close()
@@ -542,12 +338,16 @@ class DirectoryTests(Base):
         self.assertFalse(ok)
         self.assertIn("not a directory", message)
 
-    def test_missing_parent_is_reported_not_sent_to_root(self):
-        self.privileged = True
+    def test_missing_parent_is_reported(self):
         ok, message = h.prepare_torrserver_directory(os.path.join(self.base, "missing"))
         self.assertFalse(ok)
         self.assertIn("Failed to create", message)
         self.assertEqual(self.sudo_calls, [])
+
+    def test_empty_directory_tells_the_user_what_to_do(self):
+        ok, message = h.prepare_torrserver_directory("")
+        self.assertFalse(ok)
+        self.assertIn("Browse", message)
 
     def test_concurrent_creation_is_tolerated(self):
         real = os.mkdir
@@ -558,15 +358,66 @@ class DirectoryTests(Base):
         self.assertEqual(h.prepare_torrserver_directory(self.base), (True, ""))
 
 
-class FormTests(Base):
-    """What the settings form lets an ordinary (no extra permissions) user do."""
+class FolderAccessMessageTests(Base):
+    def test_the_message_names_the_folder_and_the_share_to_fix(self):
+        message = h.not_writable_message("/volume1/docker/PlexTorr")
+        self.assertIn("/volume1/docker/PlexTorr", message)
+        self.assertIn("shared folder docker (", message)
+        self.assertIn("System internal user", message)
 
-    def render(self, privileged):
-        self.saved = (h.has_privileged_access, h.get_dsm_certificates)
-        self.addCleanup(lambda: (setattr(h, "has_privileged_access", self.saved[0]),
-                                 setattr(h, "get_dsm_certificates", self.saved[1])))
-        h.has_privileged_access = lambda use_cache=True: privileged
-        h.get_dsm_certificates = lambda: []
+    def test_the_share_is_the_first_folder_below_the_volume(self):
+        self.assertEqual(h.share_of("/volume2/media/a/b"), "media")
+        self.assertEqual(h.share_of("/volume1/docker"), "docker")
+        self.assertEqual(h.share_of("/volume1"), "volume1")
+
+
+class BrowseAccessTests(Base):
+    """The folder chooser says so before Save when the TorrServer user has no write access."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = tempfile.mkdtemp(prefix="volume1-")
+        self.addCleanup(shutil.rmtree, self.base, True)
+        os.mkdir(os.path.join(self.base, "open"))
+        os.mkdir(os.path.join(self.base, "locked"))
+        self.denied = set()
+        self.real = (os.access, h.cache_browser_path)
+        self.addCleanup(lambda: (setattr(os, "access", self.real[0]), setattr(h, "cache_browser_path", self.real[1])))
+        h.cache_browser_path = lambda p: p if p else "/"
+        os.access = lambda p, mode, **kw: p not in self.denied and self.real[0](p, mode, **kw)
+
+    def test_a_folder_without_write_access_is_marked_in_the_list(self):
+        self.denied = {os.path.join(self.base, "locked")}
+        page = h.cache_browser_page(self.base, "torrserver")
+        row_locked = page[page.index(">locked/<"):page.index("</a>", page.index(">locked/<"))]
+        row_open = page[page.index(">open/<"):page.index("</a>", page.index(">open/<"))]
+        self.assertIn("no write access", row_locked)
+        self.assertNotIn("no write access", row_open)
+
+    def test_choosing_such_a_folder_warns_before_save_and_names_the_share(self):
+        locked = os.path.join(self.base, "locked")
+        self.denied = {locked}
+        page = h.cache_browser_page(locked, "torrserver")
+        self.assertIn(h.NOT_WRITABLE_A, page)
+        self.assertIn(h.NOT_WRITABLE_C, page)
+        self.assertIn(locked, page)
+        self.assertIn(h.share_of(locked), page)
+
+    def test_a_writable_folder_has_no_warning(self):
+        page = h.cache_browser_page(os.path.join(self.base, "open"), "torrserver")
+        self.assertNotIn(h.NOT_WRITABLE_A, page)
+        self.assertNotIn("no write access", page)
+
+    def test_folder_names_are_never_translated(self):
+        os.mkdir(os.path.join(self.base, "Status"))
+        h.write_file(h.LANGUAGE_FILE, "ru")
+        self.assertIn(">Status/<", h.cache_browser_page(self.base, "torrserver"))
+
+
+class FormTests(Base):
+    """What the settings form shows. Everything works for the package user."""
+
+    def render(self, privileged=False):
         return h.settings_page()
 
     def tag(self, page, pattern):
@@ -574,54 +425,54 @@ class FormTests(Base):
         self.assertIsNotNone(match, pattern)
         return match.group(0)
 
-    def test_nothing_that_needs_no_root_is_locked(self):
-        page = self.render(privileged=False)
+    def test_nothing_is_locked(self):
+        page = self.render()
         for pattern in (r"<fieldset[^>]*>", r'<input[^>]*name="port"[^>]*>',
                         r'<input[^>]*name="torrserver_dir"[^>]*>', r'<input[^>]*name="fuse"[^>]*>',
-                        r'<input[^>]*name="https"[^>]*>', r'<option value="self"[^>]*>',
-                        r'<input[^>]*name="auth"[^>]*>', r'<button type="submit"[^>]*>Save',
-                        r'<button[^>]*formaction="./restart"[^>]*>'):
-            self.assertNotIn("disabled", self.tag(page, pattern), pattern)
-
-    def test_root_only_choices_are_locked_without_permissions(self):
-        page = self.render(privileged=False)
-        for pattern in (r'<option value="dsm"[^>]*>',):
-            self.assertIn("disabled", self.tag(page, pattern), pattern)
-
-    def test_everything_is_available_with_permissions(self):
-        page = self.render(privileged=True)
-        for pattern in (r'<option value="dsm"[^>]*>',
-                        r'<button[^>]*formaction="./restart"[^>]*>', r"<fieldset[^>]*>"):
+                        r'<input[^>]*name="https"[^>]*>', r'<input[^>]*name="auth"[^>]*>',
+                        r'<button type="submit"[^>]*>Save', r'<button[^>]*formaction="./restart"[^>]*>'):
             self.assertNotIn("disabled", self.tag(page, pattern), pattern)
 
 
+class SslManualTests(FormTests):
+    """The SSL card is a manual: no form fields, no root, two renewal options."""
 
-class PermissionsInSettingsTests(FormTests):
-    """The permission help lives inside the certificate card; there is no extra window."""
-
-    def test_no_separate_permissions_window(self):
-        page = self.render(privileged=False)
-        self.assertNotIn("openPermissions", page)
-        self.assertNotIn("Setup permissions", page)
-        self.assertFalse(hasattr(h, "permissions_page"))
-
-    def test_without_permissions_the_help_is_in_the_certificate_card(self):
-        page = self.render(privileged=False)
+    def card(self):
+        page = self.render()
         card = page[page.index("SSL Certificate</span>"):]
-        card = card[:card.index('<button type="submit">Save')]
-        for text in ("/var/packages/TorrServer/scripts/setup-permissions", "Task Scheduler",
-                     "reverse proxy", "Check permissions", "<details"):
+        return card[:card.index("<script>")]
+
+    def test_the_card_has_no_form_controls(self):
+        card = self.card()
+        for tag in ("<input", "<select", "<button", "<option"):
+            self.assertNotIn(tag, card)
+        page = self.render()
+        for name in ("ssl_mode", "ssl_cert", "ssl_key", "sslMode", "sslDsm", "cert-fields"):
+            self.assertNotIn(name, page)
+
+    def test_the_card_explains_the_manual_upload_and_both_options(self):
+        card = self.card()
+        for text in ("Manual upload", "Settings, Additional, HTTPS", "Option 1: reverse proxy",
+                     "Option 2: Task Scheduler", "User-defined script",
+                     "/usr/syno/etc/certificate/_archive", "DEFAULT"):
             self.assertIn(text, card)
 
-    def test_with_permissions_only_a_short_confirmation_is_shown(self):
-        page = self.render(privileged=True)
-        self.assertIn("Extended DSM permissions are configured.", page)
-        self.assertNotIn("setup-permissions", page)
-        self.assertNotIn("permission-help\"", page.split("</style>")[1])
+    def test_the_script_is_shown_as_it_is_and_never_translated(self):
+        card = self.card()
+        self.assertIn('<pre translate="no">#!/bin/sh', card)
+        self.assertEqual(html.unescape(card[card.index("<pre"):card.index("</pre>")].split(">", 1)[1]),
+                         h.SSL_SCRIPT.strip("\n"))
+
+    def test_no_root_helper_is_mentioned_or_offered(self):
+        page = self.render()
+        for text in ("setup-permissions", "certificate-helper", "prepare-directory", "sudo",
+                     "Check permissions", "DSM permissions"):
+            self.assertNotIn(text, page)
+        self.assertEqual([n for n in ("has_privileged_access", "get_dsm_certificates", "PREPARE_DIRECTORY",
+                                      "CERTIFICATE_HELPER", "sudo_denied") if hasattr(h, n)], [])
 
     def test_the_restart_button_needs_no_permissions(self):
-        # render() patches module state and must be called once per test.
-        tag = self.tag(self.render(privileged=False), r'<button[^>]*formaction="./restart"[^>]*>')
+        tag = self.tag(self.render(), r'<button[^>]*formaction="./restart"[^>]*>')
         self.assertNotIn("disabled", tag)
 
 
@@ -631,11 +482,11 @@ class SettingsLayoutTests(FormTests):
     def titles(self, page):
         return re.findall(r'<div class="settings-card-title">\s*<span class="metric-icon">.*?</span>\s*<span>([^<]*)</span>', page, re.S)
 
-    def test_authentication_comes_before_the_certificate_and_the_buttons_come_last(self):
+    def test_the_buttons_follow_the_forms_and_the_certificate_manual_comes_last(self):
         page = self.render(privileged=False)
         titles = self.titles(page)
         self.assertLess(titles.index("Authentication"), titles.index("SSL Certificate"))
-        self.assertLess(page.index("SSL Certificate</span>"), page.index('<button type="submit">Save'))
+        self.assertLess(page.index('<button type="submit">Save'), page.index("SSL Certificate</span>"))
         self.assertEqual(page.count('<button type="submit">Save'), 1)
 
     def test_no_media_server_window_any_more(self):

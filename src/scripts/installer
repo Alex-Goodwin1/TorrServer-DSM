@@ -98,9 +98,6 @@ postinst ()
 
     call_func "service_postinst" install_log
 
-    # Nothing is written to the package log here: the installer runs as root,
-    # and a log file created by root could not be written by TorrServer.
-
     exit 0
 }
 

@@ -47,6 +47,16 @@ setup_var dsm
 run_setup migrate_config >/dev/null
 check "server.pem kept in dsm mode"         has server.pem
 
+echo "== upgrade to schema 5: the certificate source settings are gone, the copied pair stays"
+setup_var dsm; echo /usr/syno/c.pem > "$VAR/torrserver.ssl.cert"; echo /usr/syno/k.pem > "$VAR/torrserver.ssl.key"
+run_setup migrate_config >/dev/null
+check "ssl mode setting removed"            hasnt torrserver.ssl.mode
+check "ssl cert setting removed"            hasnt torrserver.ssl.cert
+check "ssl key setting removed"             hasnt torrserver.ssl.key
+check "copied key kept"                     has server.key
+check "no root helper is referenced any more" sh -c "! grep -rqE '/bin/sudo|sudo -n|certificate-helper|prepare-directory|setup-permissions' '${SCRIPTS}'"
+check "the root scripts are not shipped"    sh -c "[ ! -e '${SCRIPTS}/certificate-helper' ] && [ ! -e '${SCRIPTS}/prepare-directory' ] && [ ! -e '${SCRIPTS}/setup-permissions' ]"
+
 echo "== second upgrade is a no-op for certificates"
 run_setup migrate_config >/dev/null
 check "server.pem still kept"               has server.pem
@@ -58,7 +68,7 @@ run_setup "wizard_reset_settings=true; migrate_config" >/dev/null
 check "port setting removed"                hasnt torrserver.port
 check "accounts removed"                    hasnt accs.db
 check "pending cache removed"               hasnt cache.pending
-check "certificates removed"                sh -c "[ ! -e '$VAR/server.pem' ]"
+check "a certificate pair is not the package's to delete" has server.pem
 check "schema recorded after reset"         has config.schema
 
 echo "== DSM upgrade sequence: the real postinst, then the real postupgrade"
@@ -332,7 +342,7 @@ echo "== service-setup: command line"
 setup_var self; echo 1 > "$VAR/torrserver.auth"; echo '{"u":"p"}' > "$VAR/accs.db"
 out="$(run_setup 'echo "$SERVICE_COMMAND"')"
 check "auth flag passed"                    sh -c "echo '$out' | grep -q ' -a '"
-check "one log for everything"              run_setup '[ "$LOG_FILE" = "$TORRSERVER_LOG" ] && [ "${LOG_FILE##*/}" = TorrServer.log ]'
+check "one log for everything"              run_setup '[ "${LOG_FILE##*/}" = TorrServer.log ]'
 
 echo "== service-setup: which Python runs the Helper"
 setup_var self; mkdir -p "$TMP/py/Python3.9/target/usr/bin"
@@ -407,49 +417,6 @@ setup_var self; echo 1 > "$VAR/torrserver.https"; echo 9443 > "$VAR/torrserver.h
 run_setup update_firewall_port >/dev/null 2>&1
 check "web + https ports listed"            grep -q 'dst.ports="9999,9443/tcp"' "$TMP/target/ui/TorrServer.sc"
 check "helper port NOT exposed"             sh -c "! grep -q 42777 '$TMP/target/ui/TorrServer.sc'"
-
-echo "== certificate-helper: logging into the shared log (it runs as root)"
-CH="$TMP/ch"; rm -rf "$CH"; mkdir -p "$CH"
-chlog() { # chlog <log file> : run the real log_message() against that file
-    fn="$(sed -n '/^log_message()/,/^}/p' "${SCRIPTS}/certificate-helper")"
-    LOGF="$1" FN="$fn" sh -c 'LOG_FILE="$LOGF"; eval "$FN"; log_message hello'
-}
-check "certificate-helper uses TorrServer.log"            grep -q '^LOG_FILE="${CONFIG_DIR}/TorrServer.log"' "${SCRIPTS}/certificate-helper"
-: > "$CH/TorrServer.log"; chlog "$CH/TorrServer.log"
-check "...appends in TorrServer's format to an existing log" grep -Eq "^[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]{8} UTC0 certificate-helper: hello$" "$CH/TorrServer.log"
-chlog "$CH/missing.log"
-check "...never creates the log (root would own it)"       sh -c "[ ! -e '$CH/missing.log' ]"
-echo keep > "$CH/target.txt"; ln -s "$CH/target.txt" "$CH/link.log"; chlog "$CH/link.log"
-check "...never follows a symbolic link"                   sh -c "[ \"\$(cat '$CH/target.txt')\" = keep ]"
-
-echo "== certificate-helper: path resolution"
-mkdir -p "$TMP/syno/sub" "$TMP/volume1/share"
-echo c > "$TMP/syno/sub/cert.pem"; echo c > "$TMP/volume1/share/ok.pem"
-ln -s /etc/passwd "$TMP/syno/sub/evil.pem"; ln -s "$TMP/syno/sub/cert.pem" "$TMP/volume1/share/link.pem"
-sed -n '/^resolve_path()/,/^}/p' "${SCRIPTS}/certificate-helper" \
-  | sed "s|\${CERT_ROOT}|$TMP/syno|g; s|/volume\[0-9\]\*/\*|$TMP/volume[0-9]*/*|" > "$TMP/fn.sh"
-allowed() { sh -c ". '$TMP/fn.sh'; resolve_path '$2' $1" >/dev/null 2>&1; }
-check "dsm: normal file allowed"            allowed dsm "$TMP/syno/sub/cert.pem"
-check "dsm: '..' rejected"                  sh -c "! sh -c \". '$TMP/fn.sh'; resolve_path '$TMP/syno/../../../etc/passwd' dsm\" >/dev/null 2>&1"
-check "dsm: symlink out of root rejected"   sh -c "! sh -c \". '$TMP/fn.sh'; resolve_path '$TMP/syno/sub/evil.pem' dsm\" >/dev/null 2>&1"
-check "manual: normal file allowed"         allowed manual "$TMP/volume1/share/ok.pem"
-check "manual: symlink out of share rejected" sh -c "! sh -c \". '$TMP/fn.sh'; resolve_path '$TMP/volume1/share/link.pem' manual\" >/dev/null 2>&1"
-
-echo "== prepare-directory: rejects bad input (needs root; rejections change nothing)"
-if [ "$(id -u)" -eq 0 ]; then RUN=""; elif sudo -n true 2>/dev/null; then RUN="sudo -n"; else RUN="skip"; fi
-if [ "$RUN" = skip ]; then
-    echo "SKIP (not root and no passwordless sudo)"
-else
-    $RUN sh "${SCRIPTS}/prepare-directory" >/dev/null 2>&1; rc=$?
-    check "no argument exits 64 (the Helper's permission probe relies on it)" [ "$rc" -eq 64 ]
-    $RUN sh "${SCRIPTS}/prepare-directory" a b >/dev/null 2>&1; rc=$?
-    check "wrong argument count also exits 64" [ "$rc" -eq 64 ]
-    $RUN sh "${SCRIPTS}/prepare-directory" "/etc" >/dev/null 2>&1; rc=$?
-    check "a rejected directory is NOT 64 (not mistaken for the probe)" [ "$rc" -eq 1 ]
-    for bad in "/volume1/../etc/x" "/volume1" "/etc" "/volume1/a b" "/volume1/ok/.."; do
-        check "rejects '$bad'"              sh -c "! $RUN sh '${SCRIPTS}/prepare-directory' '$bad' >/dev/null 2>&1"
-    done
-fi
 
 echo "== release notes extraction (CI release job)"
 NOTES="${ROOT}/.github/scripts/release-notes.sh"

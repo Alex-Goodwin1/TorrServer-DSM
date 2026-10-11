@@ -66,9 +66,9 @@ NOT_SHOWN = {"", "no session cookie", "TorrServer is not running", "Settings sav
 # DSM's own interface (other keys merely name this package's pages, such as
 # "DSM Permissions", which is not a DSM screen).
 INSTRUCTIONS = [
-    "Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:",
-    h.NOT_WRITABLE,
-    h.PERMISSIONS_OUTDATED,
+    "Option 2: Task Scheduler",
+    "Create a Task Scheduler task of the type User-defined script. Run it as root, repeat it daily and use this script. It copies the DSM certificate to a folder of your choice and gives the TorrServer user access to it:",
+    h.NOT_WRITABLE_C,
 ]
 # These names are unmistakably DSM screens: a message that uses them must be listed above.
 UNMISTAKABLE = ("Task Scheduler", "Control Panel", "Shared Folder", "Package Center")
@@ -153,16 +153,9 @@ class MessagesAreTranslated(unittest.TestCase):
                 if any(t.endswith("_PORT_ERRORS") for t in targets):
                     for element in node.value.elts:
                         add(element.value)
-        add(h.NOT_WRITABLE)
-        add(h.PERMISSIONS_OUTDATED)
+        for part in (h.NOT_WRITABLE_A, h.NOT_WRITABLE_B, h.NOT_WRITABLE_C, "no write access"):
+            add(part)
 
-        # messages printed by the root script that the Helper passes on
-        with open(os.path.join(ROOT, "src", "scripts", "prepare-directory"), encoding="utf-8") as f:
-            for line in f:
-                match = re.search(r'echo "([^"]+)"', line)
-                if match and not match.group(1).startswith(("This script must", "Usage:")):
-                    text = re.split(r"\$\{", match.group(1))[0]
-                    add(text if text.endswith(": ") else text.rstrip("."))
         return messages
 
     def test_the_messages_were_found(self):
@@ -197,13 +190,11 @@ class NoMixedLanguages(unittest.TestCase):
     def setUp(self):
         for name in os.listdir(os.environ["TORRSERVER_DSM_VAR"]):
             os.remove(os.path.join(os.environ["TORRSERVER_DSM_VAR"], name))
-        self.saved = {n: getattr(h, n) for n in ("has_privileged_access", "cache_browser_path", "get_dsm_certificates",
+        self.saved = {n: getattr(h, n) for n in ("cache_browser_path",
                                                  "is_port_in_use", "prepare_torrserver_directory", "torrserver_request",
                                                  "get_port", "check_dsm_session")}
         self.addCleanup(lambda: [setattr(h, n, v) for n, v in self.saved.items()])
-        h.has_privileged_access = lambda use_cache=True: False
         h.cache_browser_path = lambda p: p
-        h.get_dsm_certificates = lambda: []
         h.is_port_in_use = lambda n, allowed_ports=None: n in (8091, 12345)
         h.prepare_torrserver_directory = lambda d: (True, "")
         h.torrserver_request = lambda *a, **k: (False, "Connection refused", True)
@@ -232,7 +223,7 @@ class NoMixedLanguages(unittest.TestCase):
 
     def message(self, lang, **override):
         h.write_file(h.LANGUAGE_FILE, lang)
-        data = dict(port="8090", torrserver_dir="/volume1/TS", https="0", https_port="8091", ssl_mode="self", auth="0")
+        data = dict(port="8090", torrserver_dir="/volume1/TS", https="0", https_port="8091", auth="0")
         data.update(override)
         ok, english = h.save_settings({k: [v] for k, v in data.items()})
         self.assertFalse(ok, override)
@@ -248,14 +239,10 @@ class NoMixedLanguages(unittest.TestCase):
         "port out of range": dict(port="80"),
         "bad https port": dict(https_port="abc"),
         "spaces in the directory": dict(torrserver_dir="/volume1/My Data"),
-        "bad certificate mode": dict(ssl_mode="bogus"),
-        "manual paths missing": dict(ssl_mode="manual"),
-        "manual paths outside the volume": dict(ssl_mode="manual", ssl_cert="/etc/a", ssl_key="/etc/b"),
         "user name missing": dict(auth="1"),
         "user name with a colon": dict(auth="1", username="a:b", password="x"),
         "password missing": dict(auth="1", username="u"),
         "TorrServer unreachable": dict(),
-        "DSM certificate without permissions": dict(ssl_mode="dsm", ssl_cert="/usr/syno/a", ssl_key="/usr/syno/b"),
     }
 
     def test_error_messages_are_in_one_language(self):
@@ -277,8 +264,8 @@ class NoMixedLanguages(unittest.TestCase):
         problems = []
         for lang in LANGS:
             h.write_file(h.LANGUAGE_FILE, lang)
-            for text in (h.NOT_WRITABLE, h.PERMISSIONS_OUTDATED,
-                         "Open Task Scheduler in DSM and create a User-defined script task. Select root as the user and run the following command once:"):
+            for text in (h.not_writable_message("/volume1/ab"),
+                         "Create a Task Scheduler task of the type User-defined script. Run it as root, repeat it daily and use this script. It copies the DSM certificate to a folder of your choice and gives the TorrServer user access to it:"):
                 shown = h.localize_html("<p>%s</p>" % html.escape(text))
                 left = self.leftovers(lang, shown, text)
                 if left:
@@ -324,10 +311,7 @@ class NoMixedLanguages(unittest.TestCase):
 class TranslationQuality(unittest.TestCase):
     # (English key, UI labels it refers to). The translation must name them as the UI does.
     REFERENCES = [
-        ("After the task finishes, return to TorrServer Settings and click Check permissions.", ["Check permissions"]),
         ("Choose the TorrServer directory with the Browse button", ["Browse"]),
-        (h.NOT_WRITABLE, ["DSM permissions"]),
-        (h.PERMISSIONS_OUTDATED, ["DSM permissions"]),
     ]
 
     def test_messages_name_buttons_and_pages_exactly_as_the_ui_does(self):

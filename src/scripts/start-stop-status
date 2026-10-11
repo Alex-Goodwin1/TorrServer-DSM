@@ -19,8 +19,7 @@ fi
 start_daemon ()
 {
     i=0
-    # Created here, by the package user, so root (certificate-helper) only ever
-    # appends to a file that belongs to the service.
+    # Created here, by the package user, so the log belongs to the service.
     : >> "${LOG_FILE}"
     service_prestart >> "${LOG_FILE}" 2>&1
     printf "%s" "$SERVICE_COMMAND" | while read -r service || [ -n "$service" ]
