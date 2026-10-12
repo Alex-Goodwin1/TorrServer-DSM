@@ -56,6 +56,13 @@ FUSE_FILE = os.path.join(PACKAGE_VAR, "torrserver.fuse")
 HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.https")
 HTTPS_PORT_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.port")
 FORCE_HTTPS_FILE = os.path.join(PACKAGE_VAR, "torrserver.force.https")
+HTTP_MEDIA_FILE = os.path.join(PACKAGE_VAR, "torrserver.http.media")
+PLEX_SCAN_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.scan")
+PLEX_URL_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.url")
+PLEX_TOKEN_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.token")
+PLEX_SECTION_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.section")
+PLEX_DEFAULT_URL = "http://127.0.0.1:32400"
+HTTPS_ONLY_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.only")
 
 HELPER_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_LOGO_FILE = os.path.join(HELPER_DIR, "torrserver-status.png")
@@ -606,6 +613,7 @@ def get_running_ports():
         "https": None,
         "ssl": False,
         "force_https": False,
+        "https_only": False,
     }
 
     try:
@@ -660,6 +668,9 @@ def get_running_ports():
                     elif arg == "--force-https":
                         result["force_https"] = True
 
+                    elif arg == "--https-only":
+                        result["https_only"] = True
+
                 return result
 
             except (OSError, IOError):
@@ -695,6 +706,56 @@ def get_https_port():
 
 def get_force_https():
     return read_file(FORCE_HTTPS_FILE, "0") == "1"
+
+
+def get_http_media():
+    return read_file(HTTP_MEDIA_FILE, "0") == "1"
+
+
+PLEX_SECTION_PATTERN = re.compile(r"^[0-9]{1,6}$")
+PLEX_MAX_SECTIONS = 10
+PLEX_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{8,128}$")
+PLEX_URL_PATTERN = re.compile(r"^https?://[A-Za-z0-9.\-]+(:[0-9]{1,5})?$")
+
+
+def normalize_plex_url(value):
+    """``http(s)://host[:port]`` without a trailing slash, or "" when invalid."""
+    value = (value or "").strip().rstrip("/")
+    return value if PLEX_URL_PATTERN.match(value) else ""
+
+
+def normalize_plex_sections(value):
+    """"6, 7;6" -> "6,7": the library IDs once each, or "" when something is not a number."""
+    parts = [part for part in re.split(r"[,;\s]+", (value or "").strip()) if part]
+    sections = []
+    for part in parts:
+        if not PLEX_SECTION_PATTERN.match(part):
+            return ""
+        if part not in sections:
+            sections.append(part)
+    if not sections or len(sections) > PLEX_MAX_SECTIONS:
+        return ""
+    return ",".join(sections)
+
+
+def get_plex_settings():
+    """The Plex scan settings. ``active`` means FUSE and the option are on. The
+    library IDs are optional: without them every library is scanned."""
+    url = normalize_plex_url(read_file(PLEX_URL_FILE, PLEX_DEFAULT_URL)) or PLEX_DEFAULT_URL
+    token = read_file(PLEX_TOKEN_FILE, "")
+    section = read_file(PLEX_SECTION_FILE, "")
+    scan = read_file(PLEX_SCAN_FILE, "0") == "1" and read_file(FUSE_FILE, "0") == "1"
+    return {
+        "scan": scan,
+        "url": url,
+        "token": token,
+        "section": section,
+        "active": bool(scan and token),
+    }
+
+
+def get_https_only():
+    return read_file(HTTPS_ONLY_FILE, "0") == "1"
 
 
 def is_torrserver_running():
@@ -990,8 +1051,8 @@ def _local_tls_context():
     return context
 
 
-def torrserver_request(payload, http_port=None):
-    """POST *payload* to the running TorrServer ``/settings`` endpoint.
+def torrserver_request(payload, http_port=None, path="/settings"):
+    """POST *payload* to a running TorrServer endpoint (``/settings`` by default).
 
     Tries HTTP first (the running instance may still be HTTP although the
     saved flags already say HTTPS), then HTTPS. Returns
@@ -1001,10 +1062,10 @@ def torrserver_request(payload, http_port=None):
     http_port = get_port() if http_port is None else int(http_port)
     https_port = get_https_port()
 
-    endpoints = [("http://127.0.0.1:{}/settings".format(http_port), None)]
+    endpoints = [("http://127.0.0.1:{}{}".format(http_port, path), None)]
     if https_port != http_port:
         endpoints.append((
-            "https://127.0.0.1:{}/settings".format(https_port),
+            "https://127.0.0.1:{}{}".format(https_port, path),
             _local_tls_context(),
         ))
 
@@ -1217,6 +1278,12 @@ def save_settings(params):
     https = field("https", "0")
     https_port = field("https_port", "8091").strip()
     force_https = field("force_https", "0")
+    http_media = field("http_media", "0")
+    https_only = field("https_only", "0")
+    plex_scan = field("plex_scan", "0")
+    plex_url = field("plex_url", PLEX_DEFAULT_URL).strip()
+    plex_token = field("plex_token").strip()
+    plex_section = field("plex_section").strip()
 
     old_port = get_port()
     old_https_port = get_https_port()
@@ -1278,6 +1345,39 @@ def save_settings(params):
             else:
                 return False, "Password is required"
 
+    # The Plex scan needs FUSE; its fields are disabled in the form otherwise.
+    plex_on = fuse == "1" and plex_scan == "1"
+    plex_warning = ""
+
+    if plex_on:
+        plex_url = normalize_plex_url(plex_url or PLEX_DEFAULT_URL)
+        if not plex_url:
+            return False, "Plex address must look like http://127.0.0.1:32400"
+
+        if plex_section:
+            plex_section = normalize_plex_sections(plex_section)
+            if not plex_section:
+                return False, "Plex library IDs must be numbers separated by commas"
+
+        if plex_token == PASSWORD_PLACEHOLDER or not plex_token:
+            plex_token = read_file(PLEX_TOKEN_FILE, "")
+
+        if not plex_token:
+            return False, "Plex token is required"
+
+        if not PLEX_TOKEN_PATTERN.match(plex_token):
+            return False, "Plex token may contain only letters, digits, - and _"
+
+        # A wrong token or library ID would fail silently later: ask Plex now.
+        # If Plex is simply not reachable the settings are still saved.
+        for section in (plex_section.split(",") if plex_section else [""]):
+            state, plex_message = plex_check(plex_url, plex_token, section)
+            if state == "bad":
+                return False, plex_message
+            if state == "offline":
+                plex_warning = "Plex could not be reached now, so the token and library ID were not checked"
+                break
+
     # ---- 2. Apply. Side effects start only after validation succeeded.
 
     status = "applied"
@@ -1303,12 +1403,27 @@ def save_settings(params):
         write_file(PORT_FILE, str(port_number))
         write_file(HTTPS_PORT_FILE, str(https_port_number))
         write_file(HTTPS_FILE, "1" if https == "1" else "0")
-        write_file(FORCE_HTTPS_FILE, "1" if force_https == "1" and https == "1" else "0")
+        # "HTTPS only" closes the HTTP port, so it excludes the redirect and
+        # the plain-HTTP stream links (TorrServer refuses the combination).
+        only = https == "1" and https_only == "1"
+        force = https == "1" and force_https == "1" and not only
+        write_file(HTTPS_ONLY_FILE, "1" if only else "0")
+        write_file(FORCE_HTTPS_FILE, "1" if force else "0")
+        # Plain-HTTP media URLs only make sense while HTTP is redirected.
+        write_file(HTTP_MEDIA_FILE, "1" if force and http_media == "1" else "0")
+        write_file(PLEX_SCAN_FILE, "1" if plex_on else "0")
+        if plex_on:
+            write_file(PLEX_URL_FILE, plex_url)
+            write_file(PLEX_SECTION_FILE, plex_section)
+            write_file(PLEX_TOKEN_FILE, plex_token, mode=0o600)
     except OSError as e:
         return False, "Unable to write settings: {}".format(e)
 
     if status == "pending":
         return True, "Settings saved. The cache directory is applied when TorrServer starts"
+
+    if plex_warning:
+        return True, "Settings saved. " + plex_warning
 
     return True, "Settings saved"
 
@@ -1515,11 +1630,28 @@ button.danger:disabled,
     color: #30415e;
 }}
 
-.media-grid {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
+.media-hint[open] > summary {{
+    margin-bottom: 10px;
+}}
+
+.media-sub {{
     margin-top: 10px;
+}}
+
+.media-sub summary {{
+    cursor: pointer;
+    font-weight: 600;
+    color: #30415e;
+}}
+
+.media-sub ul {{
+    margin: 6px 0 0;
+    padding-left: 18px;
+    color: #40536f;
+}}
+
+.media-sub li {{
+    margin-bottom: 4px;
 }}
 
 .media-hint ul {{
@@ -1530,12 +1662,6 @@ button.danger:disabled,
 
 .media-hint li {{
     margin-bottom: 4px;
-}}
-
-@media (max-width: 800px) {{
-    .media-grid {{
-        grid-template-columns: 1fr;
-    }}
 }}
 
 .browse-denied {{
@@ -2102,17 +2228,22 @@ pre {{
 }}
 
 .info-links {{
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    justify-content: flex-end;
+    flex: 1 1 auto;
+    max-width: 460px;
 }}
 
 .info-link {{
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 6px 12px;
+    text-align: center;
+    line-height: 1.3;
     border: 1px solid #d6e0ec;
     border-radius: 6px;
     background: #f7f9fc;
@@ -2147,14 +2278,13 @@ pre {{
     }}
 
     .info-links {{
-        justify-content: flex-start;
-    
-    
+        grid-template-columns: 1fr;
     }}
 
     .info-maintainer-top {{
         position: static;
         margin-bottom: 8px;
+        white-space: normal;
     
     
     }}
@@ -2268,17 +2398,24 @@ def main_page(host):
     configured_https = get_https_enabled()
     auth = get_auth_enabled()
 
-    # Each protocol shows its own port, or "Disabled" (HTTPS off, or HTTP
-    # switched off by "HTTPS only").
-    http_off = configured_https and get_force_https()
-    http_value = "Disabled" if http_off else str(configured_port)
+    # Each protocol shows its own port, or "Disabled" (HTTPS off). With
+    # "Force HTTPS" the HTTP port still answers, but only with a redirect.
+    http_value = str(configured_port)
+    if configured_https and get_https_only():
+        http_value = "Disabled"
+    elif configured_https and get_force_https():
+        http_value += (
+            ", redirects to HTTPS, streams stay on HTTP"
+            if get_http_media()
+            else ", redirects to HTTPS"
+        )
     https_value = str(get_https_port()) if configured_https else "Disabled"
 
     running = get_running_ports()
     running_http_port = running["http"]
     running_https_port = running["https"]
     running_ssl = running["ssl"]
-    running_force_https = running["force_https"]
+    running_force_https = running["force_https"] or running["https_only"]
 
     http_action = ""
     if running_http_port is not None and not running_force_https:
@@ -2428,7 +2565,7 @@ def main_page(host):
 
 
 <div class="dashboard-card info-card">
-    <div class="info-maintainer-top">Synology SPK package maintained by vladlenas</div>
+    <div class="info-maintainer-top">TorrServer DSM for Synology, maintained by vladlenas</div>
 
     <div class="dashboard-card-title">
         <span class="metric-icon" data-icon="info"></span>
@@ -2438,13 +2575,14 @@ def main_page(host):
     <div class="info-layout">
         <div class="info-text">
             <div class="info-title">TorrServer DSM</div>
-            <div class="info-subtitle">TorrServer project, Synology SPK package and support</div>
+            <div class="info-subtitle">TorrServer project, TorrServer DSM package and support</div>
         </div>
 
         <div class="info-links">
             <a class="info-link" href="https://github.com/YouROK/TorrServer" target="_blank" rel="noopener noreferrer">TorrServer Project ↗</a>
-            <a class="info-link" href="https://github.com/vladlenas/TorrServer-DSM" target="_blank" rel="noopener noreferrer">SPK Project ↗</a>
+            <a class="info-link" href="https://github.com/vladlenas/TorrServer-DSM" target="_blank" rel="noopener noreferrer">TorrServer DSM Project ↗</a>
             <a class="info-link info-donate" href="https://github.com/YouROK/TorrServer#donate" target="_blank" rel="noopener noreferrer">♥ Support TorrServer project ↗</a>
+            <a class="info-link info-donate" href="https://paypal.me/VoxelFirmware" target="_blank" rel="noopener noreferrer">♥ Support TorrServer DSM project ↗</a>
         </div>
     </div>
 </div>
@@ -2537,13 +2675,9 @@ done
 
 # Information only: nothing here is a form field. Every paragraph is a single
 # line so that it is found as one key in the locale files.
-SSL_CARD = """
-<div class="settings-card">
-    <div class="settings-card-title">
-        <span class="metric-icon" data-icon="shield"></span>
-        <span>SSL Certificate</span>
-    </div>
-    <div class="settings-card-body ssl-manual">
+SSL_BLOCK = """
+<details class="media-hint ssl-manual">
+    <summary>SSL certificate instructions</summary>
 
         <p>The HTTPS certificate is set on the TorrServer web page. The package runs with the limited rights that DSM gives it, so it does not read or copy DSM certificates itself.</p>
 
@@ -2560,9 +2694,80 @@ SSL_CARD = """
         <p>Then set the certificate and the key on the TorrServer web page to the two files in that folder. TorrServer re-reads them, so a renewed certificate is picked up without a restart.</p>
         <p>If your certificate is for a domain and is not the default one, put its ID into the script. The IDs are the folder names in /usr/syno/etc/certificate/_archive.</p>
 
-    </div>
-</div>
+</details>
 """.replace("__SCRIPT__", html.escape(SSL_SCRIPT.strip("\n")))
+
+
+PLEX_BLOCK = """
+<div id="fuseHint">
+    <details class="media-hint">
+        <summary>Using FUSE with Plex</summary>
+
+    <div class="checkbox-row">
+        <label>
+            <input type="checkbox" name="plex_scan" value="1" __CHECKED__ onchange="togglePlex()">
+            Scan the Plex library when a torrent is added
+        </label>
+    </div>
+
+    <div id="plexFields">
+        <div class="form-row">
+            <label for="plexUrl">Plex address</label>
+            <input id="plexUrl" type="text" name="plex_url" value="__URL__" placeholder="http://127.0.0.1:32400" autocomplete="off">
+        </div>
+
+        <div class="form-row">
+            <label for="plexToken">Plex token</label>
+            <input id="plexToken" type="password" name="plex_token" value="__TOKEN__" data-password-placeholder="__TOKEN__" autocomplete="new-password">
+        </div>
+
+        <div class="form-row">
+            <label for="plexSection">Library IDs</label>
+            <input id="plexSection" type="text" name="plex_section" value="__SECTION__" maxlength="80" placeholder="6,7" style="max-width:220px;">
+        </div>
+
+        <div class="help" style="grid-column:2">
+            Leave the library IDs empty to scan every library. For particular libraries (for example movies and series) write the numbers after source= in the library address in Plex Web, separated by commas: 6,7. The scan only reads folder names and does not download any torrent data.
+        </div>
+    </div>
+
+    <details class="media-sub">
+        <summary>Plex settings that stop Plex from downloading your torrents</summary>
+        <ul>
+            <li>FUSE can be used as a media library source for Plex.</li>
+            <li>Keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.</li>
+            <li>In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>.</li>
+            <li>In <b>Settings → Scheduled Tasks</b> turn off <b>Perform extensive media analysis during maintenance</b>.</li>
+            <li>In <b>Settings → Library</b> turn off <b>Empty trash automatically after every scan</b>, so a scan that runs while the FUSE folder is empty cannot delete items together with their watch progress.</li>
+        </ul>
+        <div class="help">
+            Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load. The names of the Plex settings can differ slightly between Plex versions.
+        </div>
+    </details>
+
+    <details class="media-sub">
+        <summary>Where to find the Plex token and the library IDs</summary>
+        <ul>
+            <li><b>Token:</b> in Plex Web open any item, click the three dots, choose Get Info, then View XML. The address of the XML page contains X-Plex-Token=... : that is the token.</li>
+            <li><b>Library IDs:</b> open the library in Plex Web. The number after source= in the address is its ID. Another way: open http://PLEX-ADDRESS:32400/library/sections?X-Plex-Token=TOKEN in a browser. Every library has key="..." and title="...".</li>
+            <li>Several libraries, for example movies and series: 6,7. Empty: all libraries.</li>
+        </ul>
+    </details>
+    </details>
+</div>
+"""
+
+
+def plex_block():
+    settings = get_plex_settings()
+    saved = read_file(PLEX_SCAN_FILE, "0") == "1"
+    return (
+        PLEX_BLOCK
+        .replace("__CHECKED__", "checked" if saved else "")
+        .replace("__URL__", html.escape(settings["url"], quote=True))
+        .replace("__TOKEN__", html.escape(PASSWORD_PLACEHOLDER if settings["token"] else "", quote=True))
+        .replace("__SECTION__", html.escape(settings["section"], quote=True))
+    )
 
 
 def settings_page(message="", torrserver_dir_override=""):
@@ -2573,6 +2778,8 @@ def settings_page(message="", torrserver_dir_override=""):
     https = get_https_enabled()
     https_port = get_https_port()
     force_https = get_force_https()
+    http_media = get_http_media()
+    https_only = get_https_only()
     saved_username, saved_password = get_saved_account()
 
     body = page_header("TorrServer Settings")
@@ -2635,33 +2842,7 @@ To apply changes, click <b>Save</b>, then <b>Restart</b>.
             </label>
         </div>
 
-        <div id="fuseHint" class="media-hint">
-            <details>
-                <summary>Using FUSE with Plex or Emby</summary>
-
-                <div class="media-grid">
-                    <div>
-                        <strong>Plex</strong>
-                        <ul>
-                            <li>FUSE can be used as a media library source for Plex.</li>
-                            <li>Keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.</li>
-                            <li>To avoid unnecessary reads of large virtual files, disable <b>“Perform extensive file analysis during maintenance”</b> and <b>“Video preview thumbnails”</b> in Plex.</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <strong>Emby</strong>
-                        <ul>
-                            <li>FUSE can be used as a media library source for Emby.</li>
-                            <li>Background task behavior with TorrServer FUSE has not been tested in this version.</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="help">
-                    Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load.
-                </div>
-            </details>
-        </div>
+{plex_block}
 
     </div>
 </div>
@@ -2689,10 +2870,32 @@ To apply changes, click <b>Save</b>, then <b>Restart</b>.
 
         <div class="checkbox-row">
             <label>
-                <input type="checkbox" name="force_https" value="1" {} {}>
+                <input type="checkbox" name="force_https" value="1" {} {} onchange="toggleHttps(this)">
                 Force HTTPS (redirect HTTP to HTTPS)
             </label>
         </div>
+
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" name="http_media" value="1" {} {} onchange="toggleHttps(this)">
+                Keep stream links on HTTP for players and TVs
+            </label>
+        </div>
+        <div id="httpMediaHint" class="media-hint">
+            Players and TVs that cannot use HTTPS keep working: only the stream links (/stream, /play, playlists) stay on plain HTTP, everything else is redirected. The streams and the password of HTTP authentication are then sent unencrypted, so use this on a trusted home network only.
+        </div>
+
+        <div class="checkbox-row">
+            <label>
+                <input type="checkbox" name="https_only" value="1" {} {} onchange="toggleHttps(this)">
+                HTTPS only (close the HTTP port)
+            </label>
+        </div>
+        <div id="httpsOnlyHint" class="media-hint">
+            Nothing is served over plain HTTP any more, not even a redirect, so no request or password can leave the NAS unencrypted. Use it with a trusted certificate: with the self-signed one, players and TVs will not play.
+        </div>
+
+{ssl_block}
 
     </div>
 </div>
@@ -2707,19 +2910,43 @@ To apply changes, click <b>Save</b>, then <b>Restart</b>.
 </fieldset>
 </form>
 
-{ssl_card}
 </div>
 
 <script>
-function toggleHttps() {{
-    var enabled = document.querySelector('input[name="https"]').checked;
-    document.getElementById('httpsPort').disabled = !enabled;
+function toggleHttps(changed) {{
+    var field = function(name) {{ return document.querySelector('input[name="' + name + '"]'); }};
+    var https = field('https').checked;
+    var force = field('force_https');
+    var media = field('http_media');
+    var only = field('https_only');
+
+    // "HTTPS only" and the redirect exclude each other.
+    if (changed === only && only.checked) {{ force.checked = false; }}
+    if (changed === force && force.checked) {{ only.checked = false; }}
+    if (only.checked) {{ force.checked = false; }}
+    if (!force.checked) {{ media.checked = false; }}
+
+    document.getElementById('httpsPort').disabled = !https;
+    force.disabled = !https;
+    only.disabled = !https;
+    media.disabled = !(https && force.checked);
+    document.getElementById('httpMediaHint').style.display = media.checked && !media.disabled ? 'block' : 'none';
+    document.getElementById('httpsOnlyHint').style.display = only.checked && !only.disabled ? 'block' : 'none';
 }}
 
 function toggleAuth() {{
     var checkbox = document.querySelector('input[name="auth"]');
     var fields = document.getElementById('authFields');
     var inputs = fields.querySelectorAll('input');
+
+    for (var i = 0; i < inputs.length; i++) {{
+        inputs[i].disabled = !checkbox.checked;
+    }}
+}}
+
+function togglePlex() {{
+    var checkbox = document.querySelector('input[name="plex_scan"]');
+    var inputs = document.getElementById('plexFields').querySelectorAll('input');
 
     for (var i = 0; i < inputs.length; i++) {{
         inputs[i].disabled = !checkbox.checked;
@@ -2736,6 +2963,23 @@ function openTorrServerBrowser() {{
     var path = field.value.trim();
     if (!path) path = '/';
     window.location.href = './browse?path=' + encodeURIComponent(path) + '&target=torrserver';
+}}
+
+var plexToken = document.getElementById('plexToken');
+if (plexToken) {{
+    var plexPlaceholder = plexToken.getAttribute('data-password-placeholder') || '';
+
+    plexToken.addEventListener('focus', function() {{
+        if (this.value === plexPlaceholder) {{
+            this.value = '';
+        }}
+    }});
+
+    plexToken.addEventListener('blur', function() {{
+        if (!this.value && plexPlaceholder) {{
+            this.value = plexPlaceholder;
+        }}
+    }});
 }}
 
 var passwordField = document.getElementById('password');
@@ -2757,6 +3001,7 @@ if (passwordField) {{
 
 toggleHttps();
 toggleAuth();
+togglePlex();
 toggleFuseHint();
 </script>
 """.format(
@@ -2768,9 +3013,14 @@ toggleFuseHint();
         "checked" if https else "",
         "",
         https_port,
-        "checked" if force_https else "",
+        "checked" if force_https and not https_only else "",
         "" if https else "disabled",
-        ssl_card=SSL_CARD,
+        "checked" if http_media and not https_only else "",
+        "" if https and force_https and not https_only else "disabled",
+        "checked" if https_only else "",
+        "" if https else "disabled",
+        ssl_block=SSL_BLOCK,
+        plex_block=plex_block(),
         auth_card=AUTH_CARD.format(
             "checked" if auth else "",
             html.escape(saved_username, quote=True),
@@ -3315,6 +3565,140 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+def plex_log(message):
+    try:
+        print("{} plex: {}".format(time.strftime("%Y/%m/%d %H:%M:%S UTC0", time.gmtime()), message),
+              file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def plex_request(url, token, path):
+    """GET *path* from Plex. Returns ``(status, error)``: status is the HTTP
+    code, or 0 when Plex could not be reached at all."""
+    full = url + path
+    request = urllib.request.Request(
+        full,
+        headers={"X-Plex-Token": token, "Accept": "application/json"},
+        method="GET",
+    )
+    handlers = [_NoRedirect()]
+    host = urlparse(url).hostname or ""
+    if url.startswith("https://") and host in ("127.0.0.1", "localhost"):
+        handlers.append(urllib.request.HTTPSHandler(context=_local_tls_context()))
+    opener = urllib.request.build_opener(*handlers)
+
+    try:
+        with opener.open(request, timeout=10) as response:
+            response.read(1024)
+            return response.status, ""
+    except urllib.error.HTTPError as e:
+        return e.code, str(e.reason)
+    except Exception as e:
+        return 0, str(e)
+
+
+def plex_check(url, token, section):
+    """Check the token and the library ID. Returns ``(state, message)`` with
+    state "ok", "bad" (Plex answered: wrong token or library) or "offline".
+    An empty *section* only asks for the list of libraries."""
+    path = "/library/sections/{}".format(section) if section else "/library/sections"
+    status, _error = plex_request(url, token, path)
+
+    if status == 200:
+        return "ok", ""
+    if status in (401, 403):
+        return "bad", "Plex rejected the token"
+    if status == 404:
+        return "bad", "Plex library not found: check the library ID"
+    return "offline", ""
+
+
+def plex_refresh(settings):
+    """Ask Plex to scan the libraries. Listing a FUSE folder reads no torrent data.
+    Returns ``(ok, error)``; every library is asked even if one of them fails."""
+    ok = True
+    first_error = ""
+    sections = normalize_plex_sections(settings["section"]).split(",") if settings["section"] else ["all"]
+    for section in sections:
+        status, error = plex_request(
+            settings["url"],
+            settings["token"],
+            "/library/sections/{}/refresh".format(section),
+        )
+        if status != 200:
+            ok = False
+            first_error = first_error or "library {}: {}".format(section, error or status)
+    return ok, first_error
+
+
+PLEX_POLL_SECONDS = 5
+# A new torrent shows up in the FUSE folder only after its metadata arrived,
+# which for a magnet link can take a while: scan once soon and once later.
+PLEX_SCAN_DELAYS = (3, 45)
+
+
+class PlexWatcher:
+    """Scans the Plex library when a torrent is added to TorrServer."""
+
+    def __init__(self):
+        self.known = None
+        self.due = []
+        self.failed = False
+
+    def torrent_hashes(self):
+        ok, data, _reachable = torrserver_request({"action": "list"}, path="/torrents")
+        if not ok or not isinstance(data, list):
+            return None
+        return {
+            str(item.get("hash"))
+            for item in data
+            if isinstance(item, dict) and item.get("hash")
+        }
+
+    def step(self, now):
+        settings = get_plex_settings()
+
+        if not settings["active"]:
+            self.known = None
+            self.due = []
+            return
+
+        hashes = self.torrent_hashes()
+        if hashes is not None:
+            # The first answer is only the starting point: torrents that were
+            # already there are not "added".
+            if self.known is not None and hashes - self.known:
+                self.due.extend(now + delay for delay in PLEX_SCAN_DELAYS)
+            self.known = hashes
+
+        ready = [moment for moment in self.due if moment <= now]
+        if not ready:
+            return
+
+        self.due = [moment for moment in self.due if moment > now]
+        ok, error = plex_refresh(settings)
+
+        if ok:
+            self.failed = False
+            plex_log("scan requested for {}".format(
+                "library " + settings["section"] if settings["section"] else "all libraries"))
+        elif not self.failed:
+            # One line per streak of failures, not one every few seconds.
+            self.failed = True
+            plex_log("scan request failed: {}".format(error))
+
+
+def plex_watch_loop():
+    watcher = PlexWatcher()
+    while True:
+        try:
+            watcher.step(time.monotonic())
+        except Exception:
+            pass
+        time.sleep(PLEX_POLL_SECONDS)
+
+
 PENDING_POLL_SECONDS = 5
 
 
@@ -3354,6 +3738,12 @@ def run():
         daemon=True,
     )
     pending_thread.start()
+
+    plex_thread = threading.Thread(
+        target=plex_watch_loop,
+        daemon=True,
+    )
+    plex_thread.start()
 
     try:
         server.serve_forever()

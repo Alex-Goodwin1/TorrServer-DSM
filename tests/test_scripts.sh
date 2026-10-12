@@ -30,6 +30,24 @@ run_setup() { # run_setup <shell snippet>   (extra env passed through)
         sh -c ". '${SCRIPTS}/service-setup'; $1"
 }
 
+echo "== service-setup: HTTPS flags"
+https_flags() { # https_flags <https> <force> <media>
+    setup_var self; echo "$1" > "$VAR/torrserver.https"; echo "$2" > "$VAR/torrserver.force.https"; echo "$3" > "$VAR/torrserver.http.media"
+}
+https_flags 1 1 1
+check "force HTTPS + media: --http-media"   run_setup 'case "$SSL_ARGS" in *"--force-https --http-media"*) true;; *) false;; esac'
+https_flags 1 1 0
+check "force HTTPS only: no --http-media"   run_setup 'case "$SSL_ARGS" in *--force-https*) case "$SSL_ARGS" in *--http-media*) false;; *) true;; esac;; *) false;; esac'
+https_flags 1 0 1
+check "media without force: no flags"       run_setup 'case "$SSL_ARGS" in *--force-https*|*--http-media*) false;; *) true;; esac'
+https_flags 1 1 1; echo 1 > "$VAR/torrserver.https.only"
+check "HTTPS only: --https-only, no redirect" run_setup 'case "$SSL_ARGS" in *--https-only*) case "$SSL_ARGS" in *--force-https*|*--http-media*) false;; *) true;; esac;; *) false;; esac'
+check "HTTPS only: HTTP port not in firewall" run_setup 'update_firewall_port() { :; }; [ "$HTTP_CLOSED" = 1 ]'
+https_flags 0 0 0; echo 1 > "$VAR/torrserver.https.only"
+check "HTTPS off: https-only ignored"        run_setup '[ -z "$SSL_ARGS" ] && [ "$HTTP_CLOSED" = 0 ]'
+https_flags 0 1 1
+check "HTTPS off: no SSL flags at all"      run_setup '[ -z "$SSL_ARGS" ]'
+
 echo "== service-setup: upgrade migration"
 setup_var self
 run_setup migrate_config >/dev/null

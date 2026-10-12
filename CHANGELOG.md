@@ -3,6 +3,78 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.13.146 (2026-10-11)
+
+TorrServer stays at `MatriX.146`.
+
+### Changed
+
+- **Plex menu under the FUSE checkbox.** Everything about Plex now sits in one
+  collapsed menu, **Using FUSE with Plex**: the scan option, address, token,
+  library IDs and the instructions. A menu for another media server can be added
+  below it in the same way.
+- **Several Plex libraries.** Library IDs take a comma-separated list, for
+  example `4,6` for series and movies. Empty means every library. The hint now
+  says the ID is the number after `source=` in the Plex Web address.
+- **SSL certificate instructions** moved from a separate block under the buttons
+  into a collapsed menu inside the HTTPS block.
+
+## 2.12.146 (2026-10-11)
+
+TorrServer stays at `MatriX.146`.
+
+### Added
+
+- **Plex library scan when a torrent is added.** Under the FUSE checkbox in the
+  Settings: Plex address, Plex token and Library ID. The Helper watches the
+  torrent list and asks Plex to scan the library a few seconds after a new
+  torrent appears and once more about 45 seconds later, so Plex finds it
+  without a scheduled scan. The token and the library are checked with Plex
+  when the settings are saved, the token is stored in a file only the package
+  user can read, and the result is written to the TorrServer log.
+
+### Changed
+
+- **New package icon:** the TorrServer plate in the Synology style, in the
+  Package Center and in the Helper's window icons.
+- **FUSE recommendations for Plex rewritten.** They now list every Plex setting
+  that reads the virtual files in full (video preview and chapter thumbnails,
+  intro and credits markers, loudness analysis, extensive media analysis during
+  maintenance) and **Empty trash automatically after every scan**, which can
+  delete items and their watch progress when a scan runs while the FUSE folder
+  is empty.
+
+## 2.11.146 (2026-10-10)
+
+TorrServer stays at `MatriX.146`.
+
+### Changed
+
+- **Information card:** the link buttons are now equal tiles (two columns, one
+  column on a narrow window), "SPK Project" is called "TorrServer DSM Project"
+  in all languages, and a new tile supports the TorrServer DSM project (domain and repository
+  hosting). A "Support" section is added to the README.
+- **Status page: with Force HTTPS the HTTP row no longer says "Disabled".** The
+  HTTP port still answers, but only with a redirect, so the row now reads for
+  example "8090, redirects to HTTPS".
+
+### Added
+
+- **HTTPS only.** A new option passes `--https-only` to TorrServer: the HTTP
+  port is not opened at all, so not even a redirect is served and no request or
+  password can reach TorrServer over plain HTTP (with Force HTTPS a client
+  first talks to the HTTP port and is only then redirected). Use it with a
+  trusted certificate; with the self-signed one players and TVs will not play.
+  It excludes Force HTTPS and the HTTP stream links, and the HTTP port is left
+  out of the DSM firewall rule.
+- **Keep stream links on HTTP for players and TVs.** A new option next to
+  "Force HTTPS" passes `--http-media` to TorrServer: everything is still
+  redirected to HTTPS, but stream links (`/stream`, `/play`, playlists) stay on
+  plain HTTP, so players and TVs that cannot use HTTPS keep working. Streams
+  and the password of HTTP authentication are then not encrypted, so use it on a
+  trusted home network only. The option is available only together with
+  Force HTTPS.
+
 ## 2.10.146 (2026-10-10)
 
 TorrServer stays at `MatriX.146`.
