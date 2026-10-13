@@ -2,12 +2,12 @@
   "packages": [
     {
       "package": "TorrServer",
-      "version": "2.146.1-83",
+      "version": "2.146.1-84",
       "dname": "TorrServer DSM",
       "desc": "TorrServer, torrent to http (Uncensored build)",
-      "link": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.146.1-83/TorrServer-DSM-MatriX.146.1-amd64.spk",
+      "link": "https://github.com/Alex-Goodwin1/TorrServer-DSM/releases/download/v2.146.1-84/TorrServer-DSM-MatriX.146.1-amd64.spk",
       "size": 40243200,
-      "md5": "37e9bf2433bb3f6ab8a32c71863e0012",
+      "md5": "64cd97e5b5fbb25214b669e35942f745",
       "arch": "x86_64 apollolake avoton braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow cedarview denverton dockerx64 epyc7002 epyc7003 epyc7003ntb geminilake geminilakenk grantley icelaked kvmx64 purley r1000 r1000nk v1000 v1000nk",
       "qinst": true,
       "qstart": true,
