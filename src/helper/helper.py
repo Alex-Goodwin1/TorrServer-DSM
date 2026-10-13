@@ -2735,7 +2735,7 @@ PLEX_BLOCK = """
         <summary>Plex settings that stop Plex from downloading your torrents</summary>
         <ul>
             <li>FUSE can be used as a media library source for Plex.</li>
-            <li>Keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.</li>
+            <li>In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.</li>
             <li>In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>.</li>
             <li>In <b>Settings → Scheduled Tasks</b> turn off <b>Perform extensive media analysis during maintenance</b>.</li>
             <li>In <b>Settings → Library</b> turn off <b>Empty trash automatically after every scan</b>, so a scan that runs while the FUSE folder is empty cannot delete items together with their watch progress.</li>

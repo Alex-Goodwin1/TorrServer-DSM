@@ -3,6 +3,16 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.14.146.1 (2026-10-12)
+
+TorrServer updated from `MatriX.146` to `MatriX.146.1`.
+
+### Changed
+
+- **TorrServer:** updated to `MatriX.146.1`.
+- **Plex instructions:** the advice about **Show only active torrents** now says
+  that it is a setting in the TorrServer web interface, with the name used there.
+
 ## 2.13.146 (2026-10-11)
 
 TorrServer stays at `MatriX.146`.

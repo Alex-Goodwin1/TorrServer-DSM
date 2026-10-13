@@ -72,7 +72,6 @@
   "Plex": "Plex",
   "FUSE can be used as a media library source for Plex.": "FUSE можна використовувати як джерело медіатеки для Plex.",
   "Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load.": "Звичайне сканування медіатеки можна залишити увімкненим. Фоновий аналіз і створення мініатюр можуть читати великі віртуальні файли та створювати значне навантаження на процесор, мережу й сховище.",
-  "Keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "Залиште параметр <b>«Показувати лише активні торенти»</b> вимкненим, щоб Plex міг бачити медіатеку, не запускаючи торенти.",
   "Choose the TorrServer directory with the Browse button": "Виберіть каталог TorrServer кнопкою «Огляд».",
   "TorrServer subdirectory must not be a symbolic link: ": "Підкаталог TorrServer не повинен бути символічним посиланням: ",
   "TorrServer subdirectory is not a directory: ": "Підкаталог TorrServer не є каталогом: ",
@@ -145,5 +144,6 @@
   "<b>Library IDs:</b> open the library in Plex Web. The number after source= in the address is its ID. Another way: open http://PLEX-ADDRESS:32400/library/sections?X-Plex-Token=TOKEN in a browser. Every library has key=\"...\" and title=\"...\".": "<b>ID бібліотек:</b> відкрийте бібліотеку в Plex Web. Число після source= в адресі і є її ID. Інший спосіб: відкрийте в браузері http://АДРЕСА-PLEX:32400/library/sections?X-Plex-Token=ТОКЕН. У кожної бібліотеки є key=\"...\" і title=\"...\".",
   "Several libraries, for example movies and series: 6,7. Empty: all libraries.": "Кілька бібліотек, наприклад фільми й серіали: 6,7. Порожньо: усі бібліотеки.",
   "Using FUSE with Plex": "Використання FUSE з Plex",
-  "SSL certificate instructions": "Інструкції щодо SSL-сертифікатів"
+  "SSL certificate instructions": "Інструкції щодо SSL-сертифікатів",
+  "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "У налаштуваннях веб-інтерфейсу TorrServer залиште параметр <b>«Показувати лише активні торенти»</b> вимкненим, щоб Plex бачив медіатеку, не запускаючи торенти."
 }

@@ -72,7 +72,6 @@
   "Plex": "Plex",
   "FUSE can be used as a media library source for Plex.": "FUSE galima naudoti kaip Plex medijos bibliotekos šaltinį.",
   "Normal library scanning can remain enabled. Background analysis and thumbnail generation may read large virtual files and cause significant CPU, network and storage load.": "Įprastą bibliotekos skenavimą galima palikti įjungtą. Fono analizė ir miniatiūrų kūrimas gali skaityti didelius virtualius failus ir sukelti didelę procesoriaus, tinklo bei saugyklos apkrovą.",
-  "Keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "Palikite parinktį <b>„Rodyti tik aktyvius torrentus“</b> išjungtą, kad Plex galėtų matyti biblioteką nepaleisdamas torrentų.",
   "Choose the TorrServer directory with the Browse button": "Pasirinkite TorrServer katalogą mygtuku „Naršyti“.",
   "TorrServer subdirectory must not be a symbolic link: ": "TorrServer poaplankis negali būti simboline nuoroda: ",
   "TorrServer subdirectory is not a directory: ": "TorrServer poaplankis nėra katalogas: ",
@@ -145,5 +144,6 @@
   "<b>Library IDs:</b> open the library in Plex Web. The number after source= in the address is its ID. Another way: open http://PLEX-ADDRESS:32400/library/sections?X-Plex-Token=TOKEN in a browser. Every library has key=\"...\" and title=\"...\".": "<b>Bibliotekų ID:</b> „Plex Web“ atidarykite biblioteką. Skaičius po source= adrese yra jos ID. Kitas būdas: naršyklėje atidarykite http://PLEX-ADRESAS:32400/library/sections?X-Plex-Token=RAKTAS. Kiekviena biblioteka turi key=\"...\" ir title=\"...\".",
   "Several libraries, for example movies and series: 6,7. Empty: all libraries.": "Kelios bibliotekos, pavyzdžiui, filmai ir serialai: 6,7. Tuščia: visos bibliotekos.",
   "Using FUSE with Plex": "FUSE naudojimas su Plex",
-  "SSL certificate instructions": "SSL sertifikatų instrukcijos"
+  "SSL certificate instructions": "SSL sertifikatų instrukcijos",
+  "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "TorrServer žiniatinklio sąsajos nustatymuose palikite parinktį <b>„Rodyti tik aktyvius torrentus“</b> išjungtą, kad Plex matytų biblioteką nepaleisdamas torrentų."
 }
