@@ -18,7 +18,7 @@ import ssl
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse, quote
+from urllib.parse import parse_qs, urlparse, urlsplit, quote
 
 
 # The helper is only reachable through DSM nginx (see nginx/TorrServer.conf),
@@ -29,6 +29,7 @@ HELPER_PORT = 42777
 
 MAX_POST_BYTES = 64 * 1024
 USERNAME_MAX_LENGTH = 64
+MAX_ACCOUNTS = 20
 
 # TORRSERVER_DSM_VAR exists for the test suite; DSM never sets it.
 PACKAGE_VAR = os.environ.get("TORRSERVER_DSM_VAR") or "/var/packages/TorrServer/var"
@@ -62,6 +63,7 @@ PLEX_URL_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.url")
 PLEX_TOKEN_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.token")
 PLEX_SECTION_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.section")
 PLEX_DEFAULT_URL = "http://127.0.0.1:32400"
+PROXY_URL_FILE = os.path.join(PACKAGE_VAR, "torrserver.proxy.url")
 HTTPS_ONLY_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.only")
 
 HELPER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -724,6 +726,28 @@ def normalize_plex_url(value):
     return value if PLEX_URL_PATTERN.match(value) else ""
 
 
+def normalize_proxy_url(value):
+    """The address of TorrServer behind a reverse proxy: ``http(s)://host[:port][/path]``
+    without a trailing slash, or "" when it is empty or not usable."""
+    value = (value or "").strip()
+    if not value or len(value) > 200 or re.search(r"[\s\"'<>\\]", value):
+        return ""
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return ""
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return ""
+    try:
+        parts.port
+    except ValueError:
+        return ""
+    return value.rstrip("/")
+
+
+def get_proxy_url():
+    return normalize_proxy_url(read_file(PROXY_URL_FILE, ""))
+
+
 def normalize_plex_sections(value):
     """"6, 7;6" -> "6,7": the library IDs once each, or "" when something is not a number."""
     parts = [part for part in re.split(r"[,;\s]+", (value or "").strip()) if part]
@@ -1198,19 +1222,70 @@ def get_saved_account():
     return str(username), str(password)
 
 
-def save_account(username, password, previous_username=""):
-    """Store the helper-managed account first, keeping other TorrServer users."""
+def save_account(username, password, previous_username="", others=None):
+    """Store the helper-managed account first.
+
+    With *others* (a list of (name, password)) the accounts are exactly the
+    main one plus those, in that order. Without it the other TorrServer users
+    that are already stored are kept.
+    """
     accounts = load_accounts()
 
     if previous_username and previous_username != username:
         accounts.pop(previous_username, None)
 
     ordered = {username: password}
-    for name, value in accounts.items():
-        if name != username:
+    if others is None:
+        for name, value in accounts.items():
+            if name != username:
+                ordered[name] = value
+    else:
+        for name, value in others:
             ordered[name] = value
 
     write_file(ACCS_FILE, json.dumps(ordered), mode=0o600)
+
+
+def get_extra_accounts():
+    """The accounts after the first one: users added next to the main one."""
+    accounts = load_accounts()
+    return [(str(name), str(value)) for name, value in list(accounts.items())[1:]]
+
+
+def parse_extra_users(params, main_username):
+    """Read the extra user rows of the form. Returns (users, error)."""
+    names = params.get("extra_user", [])
+    passwords = params.get("extra_pass", [])
+    stored = load_accounts()
+    users = []
+    seen = {main_username}
+
+    for index, raw_name in enumerate(names):
+        name = raw_name.strip()
+        password = passwords[index] if index < len(passwords) else ""
+
+        if not name and (not password or password == PASSWORD_PLACEHOLDER):
+            continue  # an empty row the person left blank
+
+        if not valid_username(name):
+            return None, "Username must not contain a colon or control characters"
+
+        if name in seen:
+            return None, "Duplicate username: " + name
+        seen.add(name)
+
+        if password == PASSWORD_PLACEHOLDER or not password:
+            if name in stored:
+                password = str(stored[name])
+            else:
+                return None, "Password is required for user: " + name
+
+        users.append((name, password))
+
+    if len(users) + 1 > MAX_ACCOUNTS:
+        return None, "Too many users, at most: {}".format(MAX_ACCOUNTS)
+
+    return users, ""
 
 
 def valid_username(username):
@@ -1284,6 +1359,8 @@ def save_settings(params):
     plex_url = field("plex_url", PLEX_DEFAULT_URL).strip()
     plex_token = field("plex_token").strip()
     plex_section = field("plex_section").strip()
+    proxy_url_raw = field("proxy_url").strip()
+    proxy_url = normalize_proxy_url(proxy_url_raw)
 
     old_port = get_port()
     old_https_port = get_https_port()
@@ -1345,6 +1422,15 @@ def save_settings(params):
             else:
                 return False, "Password is required"
 
+        extra_users = None
+        if params.get("extra_users_present", [""])[0] == "1":
+            extra_users, extra_error = parse_extra_users(params, username)
+            if extra_users is None:
+                return False, extra_error
+
+    if proxy_url_raw and not proxy_url:
+        return False, "Reverse proxy address must look like https://torr.example.com"
+
     # The Plex scan needs FUSE; its fields are disabled in the form otherwise.
     plex_on = fuse == "1" and plex_scan == "1"
     plex_warning = ""
@@ -1395,7 +1481,7 @@ def save_settings(params):
 
     try:
         if auth == "1":
-            save_account(username, password, saved_username)
+            save_account(username, password, saved_username, extra_users)
 
         write_file(TORRSERVER_DIR_FILE, torrserver_dir)
         write_file(AUTH_FILE, "1" if auth == "1" else "0")
@@ -1411,6 +1497,7 @@ def save_settings(params):
         write_file(FORCE_HTTPS_FILE, "1" if force else "0")
         # Plain-HTTP media URLs only make sense while HTTP is redirected.
         write_file(HTTP_MEDIA_FILE, "1" if force and http_media == "1" else "0")
+        write_file(PROXY_URL_FILE, proxy_url)
         write_file(PLEX_SCAN_FILE, "1" if plex_on else "0")
         if plex_on:
             write_file(PLEX_URL_FILE, plex_url)
@@ -1628,6 +1715,53 @@ button.danger:disabled,
     cursor: pointer;
     font-weight: 600;
     color: #30415e;
+}}
+
+.users-count {{
+    float: right;
+    min-width: 22px;
+    padding: 1px 8px;
+    border-radius: 11px;
+    background: #e2e8f0;
+    color: #30415e;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+}}
+
+.users-list {{
+    max-height: 190px;
+    overflow-y: auto;
+    margin: 10px 0 8px;
+    padding-right: 4px;
+}}
+
+.user-row {{
+    display: grid;
+    grid-template-columns: 1fr 1fr 36px;
+    gap: 8px;
+    margin-bottom: 8px;
+}}
+
+.user-remove {{
+    padding: 0;
+    min-height: 36px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #64748b;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}}
+
+.user-remove:hover {{
+    color: #c62828;
+    border-color: #c62828;
+}}
+
+.users-add {{
+    min-height: 34px;
 }}
 
 .media-hint[open] > summary {{
@@ -2441,7 +2575,20 @@ def main_page(host):
         </div>
 '''.format(host, running_https_port)
 
-    web_ui_actions = http_action + https_action
+    proxy_action = ""
+    proxy_url = get_proxy_url()
+    if proxy_url and (running_http_port is not None or running_https_port is not None):
+        proxy_action = '''        <div class="web-ui-action">
+            <a class="button light-button"
+               href="{0}/"
+               target="_blank">
+                🔗 Open via proxy ↗
+            </a>
+            <div class="web-ui-address">{0}</div>
+        </div>
+'''.format(html.escape(proxy_url, quote=True))
+
+    web_ui_actions = proxy_action + http_action + https_action
 
     restarting = restart_in_progress()
 
@@ -2652,10 +2799,59 @@ AUTH_CARD = """
                 <label for="password">Password</label>
                 <input id="password" type="password" name="password" value="{}" data-password-placeholder="{}" {}>
             </div>
+
+            <details class="media-hint users-menu" __USERS_OPEN__>
+                <summary>
+                    <span>Additional users</span>
+                    <span class="users-count" id="usersCount">__USERS_COUNT__</span>
+                </summary>
+
+                <input type="hidden" name="extra_users_present" value="1" {}>
+
+                <div id="userRows" class="users-list">__USER_ROWS__</div>
+
+                <button type="button" class="secondary users-add" onclick="addUser()" {}>+ Add user</button>
+
+                <template id="userRowTemplate">__USER_ROW__</template>
+            </details>
         </div>
 
     </div>
 </div>
+"""
+
+
+USER_ROW = """
+<div class="user-row">
+    <input type="text" name="extra_user" value="__NAME__" placeholder="Username" maxlength="64" autocomplete="off" {}>
+    <input type="password" name="extra_pass" value="__PASS__" data-password-placeholder="__PASS__" placeholder="Password" autocomplete="new-password" {}>
+    <button type="button" class="user-remove" onclick="removeUser(this)" title="Remove user" aria-label="Remove user" {}>×</button>
+</div>
+"""
+
+
+def user_row(name="", has_password=False, disabled=False):
+    flag = "disabled" if disabled else ""
+    return (
+        USER_ROW.format(flag, flag, flag)
+        .replace("__NAME__", html.escape(name, quote=True))
+        .replace("__PASS__", html.escape(PASSWORD_PLACEHOLDER if has_password else "", quote=True))
+    )
+
+
+PROXY_BLOCK = """
+<details class="media-hint">
+    <summary>Reverse proxy</summary>
+
+    <div class="form-row">
+        <label for="proxyUrl">Address</label>
+        <input id="proxyUrl" type="text" name="proxy_url" value="__PROXY__" placeholder="https://torr.example.com" autocomplete="off">
+    </div>
+
+    <div class="help" style="margin-top:6px;">
+        Optional. If TorrServer is published through a DSM reverse proxy, enter its address and the Open button on the Status page will use it.
+    </div>
+</details>
 """
 
 
@@ -2736,7 +2932,7 @@ PLEX_BLOCK = """
         <ul>
             <li>FUSE can be used as a media library source for Plex.</li>
             <li>In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.</li>
-            <li>In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>.</li>
+            <li>In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>. The intro and credits markers exist only with Plex Pass.</li>
             <li>In <b>Settings → Scheduled Tasks</b> turn off <b>Perform extensive media analysis during maintenance</b>.</li>
             <li>In <b>Settings → Library</b> turn off <b>Empty trash automatically after every scan</b>, so a scan that runs while the FUSE folder is empty cannot delete items together with their watch progress.</li>
         </ul>
@@ -2781,6 +2977,7 @@ def settings_page(message="", torrserver_dir_override=""):
     http_media = get_http_media()
     https_only = get_https_only()
     saved_username, saved_password = get_saved_account()
+    extra_accounts = get_extra_accounts()
 
     body = page_header("TorrServer Settings")
 
@@ -2895,6 +3092,8 @@ To apply changes, click <b>Save</b>, then <b>Restart</b>.
             Nothing is served over plain HTTP any more, not even a redirect, so no request or password can leave the NAS unencrypted. Use it with a trusted certificate: with the self-signed one, players and TVs will not play.
         </div>
 
+{proxy_block}
+
 {ssl_block}
 
     </div>
@@ -2937,11 +3136,32 @@ function toggleHttps(changed) {{
 function toggleAuth() {{
     var checkbox = document.querySelector('input[name="auth"]');
     var fields = document.getElementById('authFields');
-    var inputs = fields.querySelectorAll('input');
+    var inputs = fields.querySelectorAll('input, button');
 
     for (var i = 0; i < inputs.length; i++) {{
         inputs[i].disabled = !checkbox.checked;
     }}
+}}
+
+function updateUsersCount() {{
+    var count = document.querySelectorAll('#userRows .user-row').length;
+    document.getElementById('usersCount').textContent = count;
+}}
+
+function addUser() {{
+    var rows = document.getElementById('userRows');
+    var template = document.getElementById('userRowTemplate');
+    rows.appendChild(template.content.cloneNode(true));
+    updateUsersCount();
+    rows.scrollTop = rows.scrollHeight;
+    var inputs = rows.querySelectorAll('input[name="extra_user"]');
+    inputs[inputs.length - 1].focus();
+}}
+
+function removeUser(button) {{
+    var row = button.closest('.user-row');
+    row.parentNode.removeChild(row);
+    updateUsersCount();
 }}
 
 function togglePlex() {{
@@ -3019,6 +3239,7 @@ toggleFuseHint();
         "" if https and force_https and not https_only else "disabled",
         "checked" if https_only else "",
         "" if https else "disabled",
+        proxy_block=PROXY_BLOCK.replace("__PROXY__", html.escape(get_proxy_url(), quote=True)),
         ssl_block=SSL_BLOCK,
         plex_block=plex_block(),
         auth_card=AUTH_CARD.format(
@@ -3028,7 +3249,13 @@ toggleFuseHint();
             html.escape(PASSWORD_PLACEHOLDER if saved_password else "", quote=True),
             html.escape(PASSWORD_PLACEHOLDER if saved_password else "", quote=True),
             "" if auth else "disabled",
-        ),
+            "" if auth else "disabled",
+            "" if auth else "disabled",
+        )
+        .replace("__USER_ROWS__", "".join(user_row(name, True, not auth) for name, _ in extra_accounts))
+        .replace("__USER_ROW__", user_row())
+        .replace("__USERS_COUNT__", str(len(extra_accounts)))
+        .replace("__USERS_OPEN__", "")
     )
 
     body += page_footer()
@@ -3222,7 +3449,10 @@ function openLog() {{
             return response.text();
         }})
         .then(function(data) {{
-            document.getElementById("logContent").textContent = data;
+            var output = document.getElementById("logContent");
+            output.textContent = data;
+            // Like "tail": open on the newest lines, scroll up for older ones.
+            output.scrollTop = output.scrollHeight;
             document.getElementById("downloadButton").href =
                 basePath + "download-log?name=" + encodeURIComponent(name);
         }})

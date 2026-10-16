@@ -3,6 +3,32 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.15.146.2 (2026-10-15)
+
+TorrServer updated from `MatriX.146.1` to `MatriX.146.2`.
+
+### Added
+
+- **More users in the authentication menu.** Under the main user there is a
+  collapsed menu **Additional users**: a scrolling list with a user name, a
+  password and a remove button per row, so the Settings page does not grow.
+  Passwords of existing users stay hidden and unchanged until retyped. Duplicate
+  names, a colon in a name and a missing password are refused with a message.
+- **Reverse proxy address.** A collapsed menu **Reverse proxy** in the HTTPS
+  block takes the address TorrServer is published at, for example
+  `https://torr.example.com`. The Status page then shows **Open via proxy** that
+  opens it, because the link built from the DSM address and the TorrServer port
+  does not work behind a reverse proxy.
+
+### Changed
+
+- **TorrServer:** updated to `MatriX.146.2`.
+- **Logs** open on the newest lines, also after Refresh, instead of at the top
+  of the file.
+- **Plex instructions** use the names of the Plex settings as Plex shows them
+  in Russian, Ukrainian, Lithuanian and Polish, and say that the intro and
+  credits markers exist only with Plex Pass.
+
 ## 2.14.146.1 (2026-10-12)
 
 TorrServer updated from `MatriX.146` to `MatriX.146.1`.

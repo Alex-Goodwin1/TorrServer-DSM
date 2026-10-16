@@ -176,6 +176,92 @@ class AccountTests(Base):
         self.assertFalse(h.valid_username("a\nb"))
         self.assertFalse(h.valid_username(""))
 
+class ExtraUsersTests(Base):
+    def setUp(self):
+        super().setUp()
+        h.write_file(h.ACCS_FILE, json.dumps({"alice": "pw1", "kid": "pw2"}))
+
+    def parse(self, names, passwords, main="alice"):
+        return h.parse_extra_users({"extra_user": names, "extra_pass": passwords}, main)
+
+    def test_new_and_stored_users(self):
+        users, error = self.parse(["kid", "mom"], ["••••••••", "secret"])
+        self.assertEqual(error, "")
+        self.assertEqual(users, [("kid", "pw2"), ("mom", "secret")])
+
+    def test_blank_rows_are_ignored(self):
+        users, _ = self.parse(["", "mom"], ["", "x"])
+        self.assertEqual(users, [("mom", "x")])
+
+    def test_rejections(self):
+        for names, passwords, text in (
+            (["mom"], [""], "Password is required for user: mom"),
+            (["mom"], ["••••••••"], "Password is required for user: mom"),
+            (["alice"], ["x"], "Duplicate username: alice"),
+            (["a", "a"], ["x", "y"], "Duplicate username: a"),
+            (["a:b"], ["x"], "colon"),
+            (["u%d" % n for n in range(h.MAX_ACCOUNTS)], ["x"] * h.MAX_ACCOUNTS, "Too many users"),
+        ):
+            users, error = self.parse(names, passwords)
+            self.assertIsNone(users, text)
+            self.assertIn(text, error)
+
+    def test_the_list_is_exactly_what_the_form_sent(self):
+        h.save_account("alice", "pw1", "alice", [("mom", "m")])
+        self.assertEqual(json.load(open(h.ACCS_FILE)), {"alice": "pw1", "mom": "m"})
+        h.save_account("alice", "pw1", "alice", [])
+        self.assertEqual(json.load(open(h.ACCS_FILE)), {"alice": "pw1"})
+
+    def test_page_lists_the_other_users_inside_the_auth_card(self):
+        h.write_file(h.AUTH_FILE, "1")
+        page = h.settings_page()
+        card = page[page.index("Enable authentication"):]
+        card = card[:card.index("HTTPS</span>")]
+        self.assertIn("Additional users", card)
+        self.assertIn('value="kid"', card)
+        self.assertNotIn("pw2", page)
+        self.assertIn('name="extra_users_present"', card)
+        self.assertIn('id="userRowTemplate"', card)
+
+
+class ProxyAddressTests(Base):
+    def test_normalizing(self):
+        for value, expected in (("https://torr.example.com", "https://torr.example.com"),
+                                (" https://torr.example.com/ ", "https://torr.example.com"),
+                                ("http://nas.local:8443/torr/", "http://nas.local:8443/torr"),
+                                ("", ""), ("torr.example.com", ""), ("ftp://x.com", ""),
+                                ("https://u:p@x.com", ""), ("https://x.com/?a=1", ""),
+                                ("https://x.com\" onclick=\"x", ""), ("https://x.com:99999", ""),
+                                ("javascript:alert(1)", ""), ("https://", "")):
+            self.assertEqual(h.normalize_proxy_url(value), expected, value)
+
+    def test_the_status_page_opens_the_proxy_address(self):
+        h.write_file(h.PROXY_URL_FILE, "https://torr.example.com")
+        saved = h.get_running_ports, h.is_torrserver_running
+        h.get_running_ports = lambda: {"http": 8090, "https": None, "ssl": False, "force_https": False, "https_only": False}
+        h.is_torrserver_running = lambda: True
+        self.addCleanup(lambda: (setattr(h, "get_running_ports", saved[0]), setattr(h, "is_torrserver_running", saved[1])))
+        page = h.main_page("nas.local")
+        self.assertIn('href="https://torr.example.com/"', page)
+        self.assertIn("Open via proxy", page)
+        self.assertIn("http://nas.local:8090", page)
+
+    def test_no_proxy_button_without_an_address(self):
+        saved = h.get_running_ports, h.is_torrserver_running
+        h.get_running_ports = lambda: {"http": 8090, "https": None, "ssl": False, "force_https": False, "https_only": False}
+        h.is_torrserver_running = lambda: True
+        self.addCleanup(lambda: (setattr(h, "get_running_ports", saved[0]), setattr(h, "is_torrserver_running", saved[1])))
+        self.assertNotIn("Open via proxy", h.main_page("nas.local"))
+
+    def test_the_field_is_in_the_https_card(self):
+        h.write_file(h.PROXY_URL_FILE, "https://torr.example.com")
+        page = h.settings_page()
+        card = page[page.index("Enable HTTPS"):]
+        self.assertIn('name="proxy_url" value="https://torr.example.com"', card)
+        self.assertLess(card.index("<summary>Reverse proxy</summary>"),
+                        card.index("<summary>SSL certificate instructions</summary>"))
+
+
 class SaveSettingsTests(Base):
     BASE = dict(port="8090", torrserver_dir="/volume1/TS", https="0",
                 https_port="8091", auth="0")
@@ -198,6 +284,18 @@ class SaveSettingsTests(Base):
     def save(self, **overrides):
         data = dict(self.BASE, **overrides)
         return h.save_settings({k: [v] for k, v in data.items()})
+
+    def test_proxy_address_is_saved_checked_and_cleared(self):
+        ok, message = self.save(proxy_url="https://torr.example.com/")
+        self.assertTrue(ok, message)
+        self.assertEqual(h.read_file(h.PROXY_URL_FILE), "https://torr.example.com")
+        ok, message = self.save(proxy_url="not an address")
+        self.assertFalse(ok)
+        self.assertIn("Reverse proxy address", message)
+        self.assertEqual(h.read_file(h.PROXY_URL_FILE), "https://torr.example.com")
+        ok, _ = self.save(proxy_url="")
+        self.assertTrue(ok)
+        self.assertEqual(h.read_file(h.PROXY_URL_FILE), "")
 
     def test_valid_save_writes_files(self):
         ok, message = self.save()
@@ -274,7 +372,7 @@ class SaveSettingsTests(Base):
         self.assertEqual(sorted(os.listdir(VAR)), sorted(os.path.basename(f) for f in (
             h.PORT_FILE, h.TORRSERVER_DIR_FILE, h.AUTH_FILE, h.FUSE_FILE, h.HTTPS_PORT_FILE,
             h.HTTPS_FILE, h.FORCE_HTTPS_FILE, h.HTTP_MEDIA_FILE, h.HTTPS_ONLY_FILE,
-        h.PLEX_SCAN_FILE)))
+        h.PLEX_SCAN_FILE, h.PROXY_URL_FILE)))
 
     def test_saving_never_touches_a_certificate_pair(self):
         for name in ("server.pem", "server.key"):
@@ -1567,6 +1665,12 @@ class PlexBlockTests(Base):
     def test_the_plex_fields_follow_the_fuse_checkbox(self):
         page = h.settings_page()
         self.assertRegex(page, r'name="fuse"[^>]*onchange="toggleFuseHint\(\)"')
+
+
+class LogsPageTests(Base):
+    def test_the_log_opens_on_its_newest_lines(self):
+        page = h.logs_page()
+        self.assertIn("output.scrollTop = output.scrollHeight", page)
 
 
 if __name__ == "__main__":

@@ -134,7 +134,6 @@
   "Plex library not found: check the library ID": "Plex library not found: check the library ID",
   "Plex could not be reached now, so the token and library ID were not checked": "Plex could not be reached now, so the token and library ID were not checked",
   "The names of the Plex settings can differ slightly between Plex versions.": "The names of the Plex settings can differ slightly between Plex versions.",
-  "In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>.": "In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>.",
   "In <b>Settings → Scheduled Tasks</b> turn off <b>Perform extensive media analysis during maintenance</b>.": "In <b>Settings → Scheduled Tasks</b> turn off <b>Perform extensive media analysis during maintenance</b>.",
   "In <b>Settings → Library</b> turn off <b>Empty trash automatically after every scan</b>, so a scan that runs while the FUSE folder is empty cannot delete items together with their watch progress.": "In <b>Settings → Library</b> turn off <b>Empty trash automatically after every scan</b>, so a scan that runs while the FUSE folder is empty cannot delete items together with their watch progress.",
   "Leave the library IDs empty to scan every library. For particular libraries (for example movies and series) write the numbers after source= in the library address in Plex Web, separated by commas: 6,7. The scan only reads folder names and does not download any torrent data.": "Leave the library IDs empty to scan every library. For particular libraries (for example movies and series) write the numbers after source= in the library address in Plex Web, separated by commas: 6,7. The scan only reads folder names and does not download any torrent data.",
@@ -145,5 +144,17 @@
   "Several libraries, for example movies and series: 6,7. Empty: all libraries.": "Several libraries, for example movies and series: 6,7. Empty: all libraries.",
   "Using FUSE with Plex": "Using FUSE with Plex",
   "SSL certificate instructions": "SSL certificate instructions",
-  "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents."
+  "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.": "In the TorrServer web interface settings keep <b>“Show only active torrents”</b> disabled so Plex can see the library without starting torrents.",
+  "In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>. The intro and credits markers exist only with Plex Pass.": "In Plex open <b>Settings → Library</b> and set <b>Generate video preview thumbnails</b>, <b>Generate chapter thumbnails</b>, <b>Generate intro video markers</b>, <b>Generate credits video markers</b> and <b>Analyze audio tracks for loudness</b> to <b>Never</b>. The intro and credits markers exist only with Plex Pass.",
+  "Additional users": "Additional users",
+  "+ Add user": "+ Add user",
+  "Remove user": "Remove user",
+  "Duplicate username: ": "Duplicate username: ",
+  "Password is required for user: ": "Password is required for user: ",
+  "Too many users, at most: ": "Too many users, at most: ",
+  "Reverse proxy": "Reverse proxy",
+  "Address": "Address",
+  "Optional. If TorrServer is published through a DSM reverse proxy, enter its address and the Open button on the Status page will use it.": "Optional. If TorrServer is published through a DSM reverse proxy, enter its address and the Open button on the Status page will use it.",
+  "Reverse proxy address must look like https://torr.example.com": "Reverse proxy address must look like https://torr.example.com",
+  "🔗 Open via proxy ↗": "🔗 Open via proxy ↗"
 }
