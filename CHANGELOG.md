@@ -3,6 +3,14 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.15.147 (2026-10-16)
+
+TorrServer updated from `MatriX.146.2` to `MatriX.147`.
+
+### Changed
+
+- **TorrServer:** updated to `MatriX.147`. The package itself is unchanged.
+
 ## 2.15.146.2 (2026-10-15)
 
 TorrServer updated from `MatriX.146.1` to `MatriX.146.2`.
