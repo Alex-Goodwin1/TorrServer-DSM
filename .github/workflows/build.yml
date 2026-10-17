@@ -162,6 +162,12 @@ jobs:
           echo "Built binaries:"
           ls -lh "$DEST_DIR"
 
+          ANDROID_COUNT=$(ls -1 "$DEST_DIR"/TorrServer-android-* 2>/dev/null | wc -l)
+          if [ "${ANDROID_COUNT}" -ne 4 ]; then
+            echo "::error::Expected 4 android binaries (arm64, arm7, amd64, 386), found ${ANDROID_COUNT}"
+            exit 1
+          fi
+
           OUTPUT=$("$DEST_DIR/TorrServer-linux-amd64" --version 2>&1) && STATUS=0 || STATUS=$?
           echo "TorrServer --version exited with ${STATUS}: ${OUTPUT}"
           if [ -z "${OUTPUT}" ]; then
@@ -189,13 +195,14 @@ jobs:
 
       - name: Clone and patch TorrServe Android client
         env:
-          UPDATE_HOST: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/torr
+          # The manifests are published as release assets: github.com paths are case
+          # insensitive, while GitHub Pages paths are not (/torrserver-dsm/... -> 404).
+          UPDATE_HOST: https://github.com/${{ github.repository }}/releases/latest/download
         run: |
           git clone https://github.com/YouROK/TorrServe.git torrserv_android
           cd torrserv_android
           
           REPO_URL="${{ github.repository }}"
-          UPDATE_HOST=$(printf '%s' "${UPDATE_HOST}" | tr '[:upper:]' '[:lower:]')
 
           find app/src -type f \( -name "*.kt" -o -name "*.java" \) -exec sed -i "s|YouROK/TorrServer|$REPO_URL|g" {} +
           
@@ -531,7 +538,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          RELEASE_FILES="$(ls -1 artifacts/spk/*.spk artifacts/dest_bin/TorrServer-* artifacts/android_out/*.apk 2>/dev/null || true)"
+          RELEASE_FILES="$(ls -1 artifacts/spk/*.spk artifacts/dest_bin/TorrServer-* artifacts/android_out/*.apk torr/server_release.json torr/apk_release.json 2>/dev/null || true)"
 
           if [ -z "${RELEASE_FILES}" ]; then
             echo "::error::No release files were produced"
@@ -549,3 +556,15 @@ jobs:
               --title "TorrServer DSM & Android v${VERSION} (Uncensored)" \
               --generate-notes
           fi
+
+          echo "Verifying the update manifests the Android client downloads..."
+          for manifest in server_release.json apk_release.json; do
+            URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${manifest}"
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 60 "${URL}" || true)
+            echo "  ${URL} -> HTTP ${CODE}"
+            if [ "${CODE}" != "200" ]; then
+              echo "::error::${manifest} is not downloadable - the Android client would report 'no data'"
+              exit 1
+            fi
+          done
+
