@@ -9,7 +9,8 @@ TorrServer DSM provides a native DSM interface for managing TorrServer on Synolo
 ## Что сделано и зачем
 
 1. **Отключение блокировок (WAF Referer Block)**  
-      В оригинальном коде жестко прописан массив `defaultBlockedReferers`. Он принудительно блокирует HTTP-запросы (возвращая ошибку `403 Forbidden`) от ряда сторонних клиентов и веб-порталов.
+     В оригинальном коде жёстко прописан массив `defaultBlockedReferers`
+([ссылка на код](https://github.com/YouROK/TorrServer/blob/bd07eb40df57b6a5241d35cd632e2e752b15440e/server/web/waf/referer.go#L11)). Он принудительно блокирует HTTP-запросы (возвращая ошибку `403 Forbidden`) от ряда сторонних клиентов и веб-порталов.
    В этот черный список (на момент создания форка) входят домены, связанные с альтернативными сборками Lampa и другими медиа-порталами: `lampa.click`, `lampa.land`, `lampa1.ru`, `bylampa.online`, `akter.black`, `tvigl.info`, `nnmtv.pw`, `line.pm`, `uspeh.sbs`, `usph.xyz`, `xabb.ru`, `abhq.ru`, `abmsx.tech`.  
      
 2. **Сборка Android-клиента (TorrServe)**  
