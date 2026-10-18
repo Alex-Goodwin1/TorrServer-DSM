@@ -76,7 +76,7 @@ jobs:
 
       - name: Clone and patch original TorrServer
         run: |
-          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | tr -d '\r' | xargs)
           git clone https://github.com/YouROK/TorrServer.git torrserver_src
           cd torrserver_src
           git checkout "$TS_VERSION"
@@ -94,7 +94,7 @@ jobs:
         env:
           GOTOOLCHAIN: auto
         run: |
-          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | tr -d '\r' | xargs)
           echo "TorrServer source version: ${TS_VERSION}"
 
           mkdir -p dest_bin
@@ -375,7 +375,7 @@ jobs:
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | xargs)
+          TS_VERSION=$(grep -E '^TORRSERVER_VERSION[[:space:]]*:=' Makefile | sed 's/^TORRSERVER_VERSION[[:space:]]*:=//' | tr -d '\r' | xargs)
           export TS_VERSION
           python3 - <<'PY'
           import json
@@ -533,6 +533,102 @@ jobs:
             git push
           fi
 
+      - name: Compose the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          version = os.environ["VERSION"]
+          base = f"https://github.com/{repo}"
+          tag = f"v{version}"
+          upstream_repo = "YouROK/TorrServer"
+
+          def gh(*args):
+              try:
+                  result = subprocess.run(["gh", *args], capture_output=True, text=True)
+              except OSError as error:
+                  print(f"gh is unavailable: {error}")
+                  return ""
+              if result.returncode != 0:
+                  print(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
+                  return ""
+              return result.stdout.strip()
+
+          server_manifest = json.loads(pathlib.Path("torr/server_release.json").read_text(encoding="utf-8"))
+          upstream_version = server_manifest["version"]
+
+          spks = sorted(pathlib.Path("artifacts/spk").glob("*.spk"))
+          apks = sorted(pathlib.Path("artifacts/android_out").glob("*.apk"))
+          spk_name = spks[0].name if spks else ""
+          apk_name = apks[0].name if apks else ""
+
+          client_version = "unknown"
+          client_info = pathlib.Path("artifacts/android_out/client_version.json")
+          if client_info.exists():
+              client_version = json.loads(client_info.read_text(encoding="utf-8")).get("version", client_version)
+
+          # Upstream publishes auto-generated notes ("What's Changed", "New Contributors",
+          # "Full Changelog") for every MatriX tag - reuse them instead of writing our own.
+          upstream_notes = gh("api", f"repos/{upstream_repo}/releases/tags/{upstream_version}", "--jq", ".body")
+
+          previous_tag = gh("release", "list", "--limit", "1", "--json", "tagName", "--jq", ".[0].tagName")
+          compare_url = f"{base}/compare/{previous_tag}...{tag}" if previous_tag and previous_tag != tag else ""
+
+          lines = [
+              f"Uncensored build of [{upstream_repo}](https://github.com/{upstream_repo}) `{upstream_version}` "
+              "for Synology DSM and the TorrServe Android client.",
+              "",
+              "Patches on top of the upstream sources:",
+              "- `Referer`/`Origin` check removed, so streams blocked by tracker-side censorship play again;",
+              f"- Android client `{client_version}` signed with a permanent key (upgrades in place) and pointed at "
+              "this repository for server and app updates.",
+              "",
+          ]
+          if upstream_notes:
+              lines += [f"## What's changed upstream ({upstream_version})", "", upstream_notes, "", "---", ""]
+          else:
+              lines += [f"No release notes found upstream for `{upstream_version}`.", "", "---", ""]
+          lines += [
+              "## Files",
+              "",
+              "| File | Purpose |",
+              "| --- | --- |",
+              "| `TorrServer-android-arm64`, `-arm7`, `-amd64`, `-386` | server binaries fetched by **Update server** in the app |",
+              "| `TorrServer-linux-amd64` | server build for x86-64 NAS and containers |",
+          ]
+          if spk_name:
+              lines.append(f"| `{spk_name}` | DSM 7 package (x86-64) |")
+          if apk_name:
+              lines.append(f"| `{apk_name}` | Android client, version {client_version} |")
+          lines += [
+              f"| `server_release.json`, `apk_release.json` | manifests the app polls: `{base}/releases/latest/download/<manifest>` |",
+              "",
+              "## Install",
+              "",
+              f"- **DSM**: Package Center -> Manual Install -> `{spk_name}`, or add "
+              f"`https://raw.githubusercontent.com/{repo}/main/catalog/amd64/packages.json` as a package source.",
+              f"- **Android**: install `{apk_name}` once, afterwards **Update server** / **Update app** "
+              "inside the app pull from this release.",
+              "",
+          ]
+          if compare_url:
+              lines += [f"**Diff against the previous build**: {compare_url}", ""]
+
+          notes = pathlib.Path("release_notes.md")
+          notes.write_text("\n".join(lines), encoding="utf-8")
+          print(f"release_notes.md <- {len(lines)} lines, upstream notes: {'yes' if upstream_notes else 'no'}")
+          print("-----")
+          print(notes.read_text(encoding="utf-8"))
+          print("-----")
+          PY
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -548,13 +644,21 @@ jobs:
           echo "Release files:"
           printf '%s\n' ${RELEASE_FILES}
 
+          NOTES_FLAG="--generate-notes"
+          if [ -s release_notes.md ]; then
+            NOTES_FLAG="--notes-file release_notes.md"
+          fi
+
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo "Release v${VERSION} already exists - uploading the new files"
+            echo "Release v${VERSION} already exists - refreshing its files and notes"
             gh release upload "v${VERSION}" ${RELEASE_FILES} --clobber
+            if [ -s release_notes.md ]; then
+              gh release edit "v${VERSION}" --notes-file release_notes.md
+            fi
           else
             gh release create "v${VERSION}" ${RELEASE_FILES} \
               --title "TorrServer DSM & Android v${VERSION} (Uncensored)" \
-              --generate-notes
+              ${NOTES_FLAG}
           fi
 
           echo "Verifying the update manifests the Android client downloads..."
