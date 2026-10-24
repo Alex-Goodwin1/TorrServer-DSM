@@ -3,6 +3,17 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+## 2.16.147.1 (2026-10-23)
+
+TorrServer updated from `MatriX.147` to `MatriX.147.1`.
+
+### Changed
+
+- **Plex scan log.** When several libraries are configured, the log now names
+  every library that failed (`library 6: Not Found; library 9: ...`) and, after
+  a failure, which libraries were scanned (`scan requested for library 4`).
+  Before, only the first error was written and a working library left no trace.
+
 ## 2.15.147 (2026-10-16)
 
 TorrServer updated from `MatriX.146.2` to `MatriX.147`.

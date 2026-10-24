@@ -1432,9 +1432,11 @@ class PlexRefreshSeveralTests(Base):
     def test_every_library_is_scanned_and_one_failure_does_not_stop_the_others(self):
         plex = FakePlex()
         self.addCleanup(plex.close)
-        ok, error = h.plex_refresh(dict(url=plex.url, token="goodtoken123", section="7,99,8"))
+        scanned = []
+        ok, error = h.plex_refresh(dict(url=plex.url, token="goodtoken123", section="7,99,8"), scanned)
         self.assertFalse(ok)
         self.assertIn("library 99", error)
+        self.assertEqual(scanned, ["7", "8"])
         self.assertEqual([path for path, _ in plex.requests],
                          ["/library/sections/7/refresh", "/library/sections/99/refresh",
                           "/library/sections/8/refresh"])
@@ -1553,6 +1555,16 @@ class PlexSettingsTests(Base):
 
 
 class PlexWatcherTests(Base):
+    def test_a_partial_failure_still_logs_the_library_that_worked(self):
+        self.ok = False
+        self.partial = True
+        watcher = h.PlexWatcher()
+        watcher.step(0)
+        self.torrents = {"a", "b", "c"}
+        watcher.step(1)
+        watcher.step(10)
+        self.assertEqual(self.logs, ["scan request failed: boom", "scan requested for library 4"])
+
     def setUp(self):
         super().setUp()
         self.torrents = {"a", "b"}
@@ -1576,8 +1588,10 @@ class PlexWatcherTests(Base):
             return False, "down", False
         return True, [{"hash": x, "title": "t"} for x in sorted(self.torrents)], True
 
-    def fake_refresh(self, settings):
+    def fake_refresh(self, settings, scanned=None):
         self.refreshes.append(settings["section"])
+        if scanned is not None and not self.ok and getattr(self, "partial", False):
+            scanned.append("4")
         return self.ok, "" if self.ok else "boom"
 
     def test_existing_torrents_are_not_news(self):

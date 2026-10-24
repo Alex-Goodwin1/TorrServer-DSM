@@ -3844,11 +3844,12 @@ def plex_check(url, token, section):
     return "offline", ""
 
 
-def plex_refresh(settings):
+def plex_refresh(settings, scanned=None):
     """Ask Plex to scan the libraries. Listing a FUSE folder reads no torrent data.
-    Returns ``(ok, error)``; every library is asked even if one of them fails."""
+    Returns ``(ok, error)``; every library is asked even if one of them fails.
+    ``error`` names every failed library, ``scanned`` collects the ones that worked."""
     ok = True
-    first_error = ""
+    errors = []
     sections = normalize_plex_sections(settings["section"]).split(",") if settings["section"] else ["all"]
     for section in sections:
         status, error = plex_request(
@@ -3858,8 +3859,10 @@ def plex_refresh(settings):
         )
         if status != 200:
             ok = False
-            first_error = first_error or "library {}: {}".format(section, error or status)
-    return ok, first_error
+            errors.append("library {}: {}".format(section, error or status))
+        elif scanned is not None:
+            scanned.append(section)
+    return ok, "; ".join(errors)
 
 
 PLEX_POLL_SECONDS = 5
@@ -3907,7 +3910,8 @@ class PlexWatcher:
             return
 
         self.due = [moment for moment in self.due if moment > now]
-        ok, error = plex_refresh(settings)
+        scanned = []
+        ok, error = plex_refresh(settings, scanned)
 
         if ok:
             self.failed = False
@@ -3917,6 +3921,8 @@ class PlexWatcher:
             # One line per streak of failures, not one every few seconds.
             self.failed = True
             plex_log("scan request failed: {}".format(error))
+            if scanned:
+                plex_log("scan requested for library " + ", ".join(scanned))
 
 
 def plex_watch_loop():
