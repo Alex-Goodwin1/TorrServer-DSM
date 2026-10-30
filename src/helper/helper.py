@@ -62,6 +62,8 @@ PLEX_SCAN_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.scan")
 PLEX_URL_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.url")
 PLEX_TOKEN_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.token")
 PLEX_SECTION_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.section")
+PLEX_ON_ADD_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.onadd")
+PLEX_ON_REMOVE_FILE = os.path.join(PACKAGE_VAR, "torrserver.plex.onremove")
 PLEX_DEFAULT_URL = "http://127.0.0.1:32400"
 PROXY_URL_FILE = os.path.join(PACKAGE_VAR, "torrserver.proxy.url")
 HTTPS_ONLY_FILE = os.path.join(PACKAGE_VAR, "torrserver.https.only")
@@ -774,6 +776,8 @@ def get_plex_settings():
         "url": url,
         "token": token,
         "section": section,
+        "on_add": read_file(PLEX_ON_ADD_FILE, "1") == "1",
+        "on_remove": read_file(PLEX_ON_REMOVE_FILE, "1") == "1",
         "active": bool(scan and token),
     }
 
@@ -1359,6 +1363,8 @@ def save_settings(params):
     plex_url = field("plex_url", PLEX_DEFAULT_URL).strip()
     plex_token = field("plex_token").strip()
     plex_section = field("plex_section").strip()
+    plex_on_add = "1" if field("plex_on_add", "0") == "1" else "0"
+    plex_on_remove = "1" if field("plex_on_remove", "0") == "1" else "0"
     proxy_url_raw = field("proxy_url").strip()
     proxy_url = normalize_proxy_url(proxy_url_raw)
 
@@ -1502,6 +1508,8 @@ def save_settings(params):
         if plex_on:
             write_file(PLEX_URL_FILE, plex_url)
             write_file(PLEX_SECTION_FILE, plex_section)
+            write_file(PLEX_ON_ADD_FILE, plex_on_add)
+            write_file(PLEX_ON_REMOVE_FILE, plex_on_remove)
             write_file(PLEX_TOKEN_FILE, plex_token, mode=0o600)
     except OSError as e:
         return False, "Unable to write settings: {}".format(e)
@@ -1770,6 +1778,53 @@ button.danger:disabled,
 
 .media-sub {{
     margin-top: 10px;
+}}
+
+.plex-when {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    margin: 4px 0 10px;
+}}
+
+.plex-when label {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}}
+
+.plex-libraries-head {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    margin: 6px 0;
+}}
+
+.plex-libraries {{
+    max-height: 190px;
+    overflow-y: auto;
+}}
+
+.plex-library {{
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    border: 1px solid #d6deea;
+    border-radius: 8px;
+}}
+
+.plex-library small {{
+    display: block;
+    color: #6b7a90;
+    overflow-wrap: anywhere;
+}}
+
+.plex-library.in-fuse {{
+    border-color: #7aa7f0;
+    background: #f3f8ff;
 }}
 
 .media-sub summary {{
@@ -2902,11 +2957,16 @@ PLEX_BLOCK = """
     <div class="checkbox-row">
         <label>
             <input type="checkbox" name="plex_scan" value="1" __CHECKED__ onchange="togglePlex()">
-            Scan the Plex library when a torrent is added
+            Scan automatically
         </label>
     </div>
 
     <div id="plexFields">
+        <div class="plex-when">
+            <label><input type="checkbox" name="plex_on_add" value="1" __ON_ADD__> when a torrent is added</label>
+            <label><input type="checkbox" name="plex_on_remove" value="1" __ON_REMOVE__> when a torrent is removed</label>
+        </div>
+
         <div class="form-row">
             <label for="plexUrl">Plex address</label>
             <input id="plexUrl" type="text" name="plex_url" value="__URL__" placeholder="http://127.0.0.1:32400" autocomplete="off">
@@ -2917,13 +2977,17 @@ PLEX_BLOCK = """
             <input id="plexToken" type="password" name="plex_token" value="__TOKEN__" data-password-placeholder="__TOKEN__" autocomplete="new-password">
         </div>
 
-        <div class="form-row">
-            <label for="plexSection">Library IDs</label>
-            <input id="plexSection" type="text" name="plex_section" value="__SECTION__" maxlength="80" placeholder="6,7" style="max-width:220px;">
-        </div>
+        <input id="plexSection" type="hidden" name="plex_section" value="__SECTION__">
 
-        <div class="help" style="grid-column:2">
-            Leave the library IDs empty to scan every library. For particular libraries (for example movies and series) write the numbers after source= in the library address in Plex Web, separated by commas: 6,7. The scan only reads folder names and does not download any torrent data.
+        <div class="plex-libraries-head">
+            <button type="button" id="plexLoad" class="secondary" onclick="loadPlexLibraries()">Load libraries from Plex</button>
+            <span id="plexSelected" class="help"></span>
+        </div>
+        <div id="plexLibraries" class="plex-libraries"></div>
+        <div id="plexLoadMessage" class="help"></div>
+
+        <div class="help">
+            Tick the libraries that use the FUSE folder. Nothing ticked: all libraries are scanned. The scan only reads folder names and does not download any torrent data.
         </div>
     </div>
 
@@ -2942,12 +3006,10 @@ PLEX_BLOCK = """
     </details>
 
     <details class="media-sub">
-        <summary>Where to find the Plex token and the library IDs</summary>
+        <summary>Where to find the Plex token</summary>
         <ul>
             <li><b>Token:</b> in Plex Web open any item, click the three dots, choose Get Info, then View XML. The address of the XML page contains X-Plex-Token=... : that is the token.</li>
-            <li><b>Library IDs:</b> open the library in Plex Web. The number after source= in the address is its ID. Another way: open http://PLEX-ADDRESS:32400/library/sections?X-Plex-Token=TOKEN in a browser. Every library has key="..." and title="...".</li>
-            <li>Several libraries, for example movies and series: 6,7. Empty: all libraries.</li>
-        </ul>
+                    </ul>
     </details>
     </details>
 </div>
@@ -2963,6 +3025,8 @@ def plex_block():
         .replace("__URL__", html.escape(settings["url"], quote=True))
         .replace("__TOKEN__", html.escape(PASSWORD_PLACEHOLDER if settings["token"] else "", quote=True))
         .replace("__SECTION__", html.escape(settings["section"], quote=True))
+        .replace("__ON_ADD__", "checked" if settings["on_add"] else "")
+        .replace("__ON_REMOVE__", "checked" if settings["on_remove"] else "")
     )
 
 
@@ -3173,6 +3237,67 @@ function togglePlex() {{
     }}
 }}
 
+function plexIds() {{
+    return document.getElementById('plexSection').value.split(',').filter(function (x) {{ return x; }});
+}}
+
+function showPlexSelected() {{
+    var ids = plexIds();
+    document.getElementById('plexSelected').textContent = ids.length ? 'Selected libraries: ' + ids.join(', ') : 'All libraries';
+}}
+
+function loadPlexLibraries() {{
+    var message = document.getElementById('plexLoadMessage');
+    var list = document.getElementById('plexLibraries');
+    var body = new URLSearchParams();
+    body.set('plex_url', document.getElementById('plexUrl').value);
+    body.set('plex_token', document.getElementById('plexToken').value);
+    body.set('torrserver_dir', document.querySelector('input[name="torrserver_dir"]').value);
+    message.textContent = 'Loading...';
+    fetch('./plex-libraries', {{method: 'POST', body: body, credentials: 'same-origin'}})
+        .then(function (response) {{ return response.json(); }})
+        .then(function (data) {{
+            list.textContent = '';
+            if (!data.ok) {{
+                var errors = {{
+                    url: 'Plex address must look like http://127.0.0.1:32400',
+                    notoken: 'Plex token is required',
+                    token: 'Plex rejected the token',
+                    offline: 'Plex could not be reached now'
+                }};
+                message.textContent = errors[data.error] || errors.offline;
+                return;
+            }}
+            message.textContent = '';
+            var chosen = plexIds();
+            data.libraries.forEach(function (library) {{
+                var row = document.createElement('label');
+                row.className = 'plex-library' + (library.fuse ? ' in-fuse' : '');
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.value = library.id;
+                box.checked = chosen.indexOf(library.id) !== -1;
+                box.addEventListener('change', function () {{
+                    var ids = [];
+                    list.querySelectorAll('input').forEach(function (item) {{
+                        if (item.checked) ids.push(item.value);
+                    }});
+                    document.getElementById('plexSection').value = ids.join(',');
+                    showPlexSelected();
+                }});
+                var text = document.createElement('span');
+                text.textContent = library.title + ' (' + library.type + ')';
+                var path = document.createElement('small');
+                path.textContent = library.path;
+                text.appendChild(path);
+                row.appendChild(box);
+                row.appendChild(text);
+                list.appendChild(row);
+            }});
+        }})
+        .catch(function () {{ message.textContent = 'Plex could not be reached now'; }});
+}}
+
 function toggleFuseHint() {{
     var checkbox = document.querySelector('input[name="fuse"]');
     document.getElementById('fuseHint').style.display = checkbox.checked ? 'block' : 'none';
@@ -3222,6 +3347,7 @@ if (passwordField) {{
 toggleHttps();
 toggleAuth();
 togglePlex();
+showPlexSelected();
 toggleFuseHint();
 </script>
 """.format(
@@ -3767,6 +3893,25 @@ class Handler(BaseHTTPRequestHandler):
 
             return
 
+        if path == "/plex-libraries":
+            url = normalize_plex_url(params.get("plex_url", [""])[0].strip() or PLEX_DEFAULT_URL)
+            token = params.get("plex_token", [""])[0].strip()
+            if token == PASSWORD_PLACEHOLDER or not token:
+                token = read_file(PLEX_TOKEN_FILE, "")
+            fuse_folder = params.get("torrserver_dir", [""])[0].strip() or get_torrserver_dir()
+            fuse_folder = os.path.join(fuse_folder, "FUSE")
+
+            if not url:
+                answer = {"ok": False, "error": "url"}
+            elif not token:
+                answer = {"ok": False, "error": "notoken"}
+            else:
+                state, libraries = plex_libraries(url, token, fuse_folder)
+                answer = {"ok": True, "libraries": libraries} if state == "ok" else {"ok": False, "error": state}
+
+            self.send_text(json.dumps(answer))
+            return
+
         if path == "/restart":
             ok, message = restart_torrserver()
 
@@ -3801,6 +3946,60 @@ def plex_log(message):
               file=sys.stderr, flush=True)
     except Exception:
         pass
+
+
+def plex_get_json(url, token, path):
+    """GET *path* from Plex and parse the JSON answer. Returns ``(status, data)``;
+    status is 0 when Plex could not be reached, data is None unless it is 200."""
+    request = urllib.request.Request(
+        url + path,
+        headers={"X-Plex-Token": token, "Accept": "application/json"},
+        method="GET",
+    )
+    handlers = [_NoRedirect()]
+    host = urlparse(url).hostname or ""
+    if url.startswith("https://") and host in ("127.0.0.1", "localhost"):
+        handlers.append(urllib.request.HTTPSHandler(context=_local_tls_context()))
+    opener = urllib.request.build_opener(*handlers)
+
+    try:
+        with opener.open(request, timeout=10) as response:
+            return response.status, json.loads(response.read(2 * 1024 * 1024).decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except Exception:
+        return 0, None
+
+
+def plex_libraries(url, token, fuse_folder=""):
+    """The libraries Plex knows: ``(state, list)`` with state "ok", "token" or "offline".
+    ``fuse`` marks the libraries whose folder is the FUSE folder or lies inside it."""
+    status, data = plex_get_json(url, token, "/library/sections")
+    if status in (401, 403):
+        return "token", []
+    if status != 200 or not isinstance(data, dict):
+        return "offline", []
+
+    fuse_folder = fuse_folder.rstrip("/")
+    libraries = []
+    for item in (data.get("MediaContainer") or {}).get("Directory") or []:
+        if not isinstance(item, dict) or not PLEX_SECTION_PATTERN.match(str(item.get("key", ""))):
+            continue
+        paths = [
+            str(location.get("path", ""))
+            for location in item.get("Location") or []
+            if isinstance(location, dict)
+        ]
+        libraries.append({
+            "id": str(item["key"]),
+            "title": str(item.get("title", "")),
+            "type": str(item.get("type", "")),
+            "path": ", ".join(paths),
+            "fuse": bool(fuse_folder) and any(
+                path.rstrip("/") == fuse_folder or path.startswith(fuse_folder + "/") for path in paths
+            ),
+        })
+    return "ok", libraries
 
 
 def plex_request(url, token, path):
@@ -3872,7 +4071,7 @@ PLEX_SCAN_DELAYS = (3, 45)
 
 
 class PlexWatcher:
-    """Scans the Plex library when a torrent is added to TorrServer."""
+    """Scans the Plex library when a torrent is added to or removed from TorrServer."""
 
     def __init__(self):
         self.known = None
@@ -3900,8 +4099,11 @@ class PlexWatcher:
         hashes = self.torrent_hashes()
         if hashes is not None:
             # The first answer is only the starting point: torrents that were
-            # already there are not "added".
-            if self.known is not None and hashes - self.known:
+            # already there are not "added". A removed torrent leaves the FUSE
+            # folder, so Plex needs a scan for that too.
+            added = settings["on_add"] and hashes - self.known if self.known is not None else False
+            removed = settings["on_remove"] and self.known - hashes if self.known is not None else False
+            if added or removed:
                 self.due.extend(now + delay for delay in PLEX_SCAN_DELAYS)
             self.known = hashes
 

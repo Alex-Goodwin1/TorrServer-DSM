@@ -74,5 +74,18 @@ fresh
 check "unpinned download refused"              sh -c '! REQUIRE_CHECKSUMS=1 ./build-package.sh MatriX.1.0 amd64 2.0.1 >"$0" 2>&1' "$TMP/out.log"
 check "tells how to fix"                       grep -q 'make checksums' "$TMP/out.log"
 
+echo "== Package Center text comes from CHANGELOG.md"
+fresh
+printf '# Changelog\n\n## 2.0.1 (2026-01-01)\n\n<!-- package-center: 1. Update to X "quoted" $HOME. 2. Second. -->\n\n- text\n\n## 2.0.0 (2025-12-31)\n\n<!-- package-center: 1. Old. -->\n' > CHANGELOG.md
+build
+spk="$(find spk -name '*.spk' | head -1)"
+info() { tar -xOf "$spk" INFO; }
+check "INFO has the text of this version"      sh -c "$(declare -f info); spk='$spk'; info | grep -qx 'changelog=\"1. Update to X quoted HOME. 2. Second.\"'"
+check "text of other versions is not used"     sh -c "$(declare -f info); spk='$spk'; ! info | grep -q 'Old'"
+rm -rf spk build; printf '# Changelog\n\n## 2.0.1 (2026-01-01)\n\n- no line\n' > CHANGELOG.md
+build
+spk="$(find spk -name '*.spk' | head -1)"
+check "no line, no changelog field"            sh -c "$(declare -f info); spk='$spk'; ! info | grep -q '^changelog='"
+
 echo
 if [ "$FAILED" -eq 0 ]; then echo "ALL PASSED"; else echo "FAILED: $FAILED"; exit 1; fi

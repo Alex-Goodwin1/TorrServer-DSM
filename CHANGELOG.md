@@ -3,6 +3,41 @@
 The top entry is used as the GitHub release notes; keep its version equal to
 `PKG_VERSION` in `Makefile`.
 
+Under each heading write one line `<!-- package-center: 1. ... 2. ... -->`: a
+short numbered list in English that DSM Package Center shows next to the update
+button (it goes into the `changelog` field of the package `INFO`; up to 600
+characters, no quotes). GitHub does not show it in the release notes.
+
+## 2.17.147.2 (2026-10-29)
+
+<!-- package-center: 1. Update to TorrServer MatriX.147.2. 2. Plex: pick libraries from a list loaded from Plex, scan automatically when a torrent is added or removed. 3. Fixed the 404 page in the Helper window after stopping and starting the package. 4. Package Center now shows what changed. -->
+
+TorrServer updated from `MatriX.147.1` to `MatriX.147.2`.
+
+### Added
+
+- **Plex libraries from a list.** In the **Using FUSE with Plex** menu the button
+  **Load libraries from Plex** shows the libraries with their type and folder;
+  tick the ones that use the FUSE folder (those inside it are highlighted).
+  Nothing ticked still means all libraries. The library IDs no longer have to be
+  looked up by hand.
+- **Plex scan when a torrent is removed.** The scan now runs after a torrent is
+  removed from TorrServer too, so Plex drops the film. The new **Scan
+  automatically** switch has two options, **when a torrent is added** and **when
+  a torrent is removed**, both on by default.
+- **What changed in Package Center.** The update list now shows a short
+  description of the changes next to the update button.
+
+### Fixed
+
+- **404 in the Helper window after stopping and starting the package.** The nginx
+  rule that DSM uses to open the Helper window is now kept while the package is
+  stopped, so DSM no longer removes it and leaves nginx without it.
+
+### Changed
+
+- **TorrServer:** updated to `MatriX.147.2`.
+
 ## 2.16.147.1 (2026-10-23)
 
 TorrServer updated from `MatriX.147` to `MatriX.147.1`.

@@ -488,7 +488,7 @@ if command -v git >/dev/null 2>&1; then
         mkdir -p "$R/.github/scripts"; cp "${ROOT}/.github/scripts/release-notes.sh" "$R/.github/scripts/"
         cp "${ROOT}/build-package.sh" "$R/"
         printf 'TORRSERVER_VERSION := MatriX.145.2\nPKG_VERSION := 2.3.145.2\n\nARCHES := amd64 arm64 arm7\n' > "$R/Makefile"
-        printf '# Changelog\n\n## 2.3.145.2 (2026-10-07)\n\nFixes.\n\n## 2.2.145.2 (2026-10-06)\n\nOlder.\n' > "$R/CHANGELOG.md"
+        printf '# Changelog\n\n## 2.3.145.2 (2026-10-07)\n\n<!-- package-center: 1. Fixes. -->\n\nFixes.\n\n## 2.2.145.2 (2026-10-06)\n\nOlder.\n' > "$R/CHANGELOG.md"
         : > "$R/checksums.sha256"
         ( cd "$R" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A \
           && git commit -qm init && git tag v2.2.145.2 && git checkout -qb release && git remote add origin "$O" \
@@ -537,6 +537,10 @@ if command -v git >/dev/null 2>&1; then
 
     newrepo; pins; printf '# Changelog\n\n## 2.3.145.2 (2026-10-07)\n\n## 2.2.145.2 (2026-10-06)\n\nOlder.\n' > "$R/CHANGELOG.md"; commit_all
     check "an empty release entry is refused"               [ "$(rc_check)" = 1 ]
+
+    newrepo; pins; sed -i '/package-center/d' "$R/CHANGELOG.md"; commit_all
+    check "an entry without the Package Center line is refused" [ "$(rc_check)" = 1 ]
+    check "...and the message says what to add"             grep -q "package-center" "$TMP/rc.out"
 
     newrepo; pins; grep -v "ffprobe-6.1-linux-64.zip" "$R/checksums.sha256" > "$R/c" && mv "$R/c" "$R/checksums.sha256"; commit_all
     check "a half-pinned checksums file is refused (CI would fail the build)" [ "$(rc_check)" = 1 ]

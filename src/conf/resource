@@ -15,6 +15,12 @@
                     "type": "dsm",
                     "relpath": "nginx/TorrServer.conf"
                 }
+            ],
+            "disable": [
+                {
+                    "type": "dsm",
+                    "relpath": "nginx/TorrServer.conf"
+                }
             ]
         }
     }

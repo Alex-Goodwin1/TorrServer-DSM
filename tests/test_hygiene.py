@@ -173,6 +173,14 @@ class RepositoryHygiene(unittest.TestCase):
         self.assertIn("nginx-static-config", resource)
         self.assertRegex(read("src", "INFO.sh"), r'(?m)^instuninst_restart_services="nginx\.service"$')
 
+    def test_the_nginx_rule_is_kept_while_the_package_is_stopped(self):
+        """A rule listed only under "enable" is removed by DSM when the package stops
+        and nginx is not reloaded when it starts again: the Helper window then shows 404."""
+        import json
+        rule = json.loads(read("src", "conf", "resource"))["web-config"]["nginx-static-config"]
+        self.assertEqual(rule.get("disable"), rule.get("enable"))
+        self.assertTrue(rule.get("enable"))
+
     def test_the_package_ships_no_build_artifacts_or_tests(self):
         script = read("build-package.sh")
         self.assertIn("__pycache__", script, "build-package.sh must strip __pycache__ from the package")

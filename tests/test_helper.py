@@ -626,7 +626,7 @@ class SettingsLayoutTests(FormTests):
         for text in ("Plex", "Generate video preview thumbnails",
                      "Perform extensive media analysis during maintenance",
                      "Empty trash automatically after every scan",
-                     "Where to find the Plex token and the library IDs"):
+                     "Where to find the Plex token"):
             self.assertIn(text, card)
         self.assertNotIn("Media servers</span>", page, "no separate card")
 
@@ -1442,6 +1442,39 @@ class PlexRefreshSeveralTests(Base):
                           "/library/sections/8/refresh"])
 
 
+class PlexLibrariesTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.saved = h.plex_get_json
+        self.addCleanup(lambda: setattr(h, "plex_get_json", self.saved))
+
+    def answer(self, status, data=None):
+        h.plex_get_json = lambda url, token, path: (status, data)
+
+    def test_libraries_are_listed_and_the_ones_in_the_fuse_folder_are_marked(self):
+        self.answer(200, {"MediaContainer": {"Directory": [
+            {"key": "4", "title": "PlexTorrTV", "type": "show", "Location": [{"path": "/volume1/video/Torrserver/FUSE"}]},
+            {"key": "7", "title": "PlexTorr", "type": "movie", "Location": [{"path": "/volume1/video/Torrserver/FUSE/movie"}]},
+            {"key": "1", "title": "Movies", "type": "movie", "Location": [{"path": "/volume1/movies"}]},
+            {"key": "x", "title": "Broken", "type": "movie"},
+        ]}})
+        state, libraries = h.plex_libraries("http://p", "token", "/volume1/video/Torrserver/FUSE")
+        self.assertEqual(state, "ok")
+        self.assertEqual([(l["id"], l["fuse"]) for l in libraries], [("4", True), ("7", True), ("1", False)])
+        self.assertEqual(libraries[1]["path"], "/volume1/video/Torrserver/FUSE/movie")
+
+    def test_a_folder_that_only_starts_with_the_same_letters_is_not_inside(self):
+        self.answer(200, {"MediaContainer": {"Directory": [
+            {"key": "2", "title": "A", "type": "movie", "Location": [{"path": "/volume1/video/FUSE2"}]}]}})
+        self.assertFalse(h.plex_libraries("http://p", "t", "/volume1/video/FUSE")[1][0]["fuse"])
+
+    def test_a_wrong_token_and_an_unreachable_plex_are_told_apart(self):
+        self.answer(401)
+        self.assertEqual(h.plex_libraries("http://p", "t")[0], "token")
+        self.answer(0)
+        self.assertEqual(h.plex_libraries("http://p", "t")[0], "offline")
+
+
 class PlexSettingsTests(Base):
     BASE = dict(port="8090", torrserver_dir="/volume1/TS", https="0", https_port="8091",
                 auth="0", fuse="1", plex_scan="1", plex_url="", plex_token="goodtoken123",
@@ -1476,6 +1509,13 @@ class PlexSettingsTests(Base):
         self.assertEqual(h.read_file(h.PLEX_TOKEN_FILE), "goodtoken123")
         self.assertEqual(os.stat(h.PLEX_TOKEN_FILE).st_mode & 0o777, 0o600)
         self.assertTrue(h.get_plex_settings()["active"])
+
+    def test_when_to_scan_is_saved_and_defaults_to_both_events(self):
+        self.assertTrue(h.get_plex_settings()["on_add"] and h.get_plex_settings()["on_remove"])
+        ok, message = self.save(plex_on_add="1")
+        self.assertTrue(ok, message)
+        settings = h.get_plex_settings()
+        self.assertEqual((settings["on_add"], settings["on_remove"]), (True, False))
 
     def test_the_token_is_never_put_into_the_page(self):
         self.save()
@@ -1615,13 +1655,29 @@ class PlexWatcherTests(Base):
         watcher.step(500)
         self.assertEqual(self.refreshes, ["3", "3"])
 
-    def test_removing_a_torrent_does_not_scan(self):
+    def test_the_when_to_scan_switches_are_respected(self):
+        h.write_file(h.PLEX_ON_REMOVE_FILE, "0")
         watcher = h.PlexWatcher()
         watcher.step(0)
         self.torrents.discard("a")
         watcher.step(10)
         watcher.step(200)
         self.assertEqual(self.refreshes, [])
+        h.write_file(h.PLEX_ON_REMOVE_FILE, "1")
+        h.write_file(h.PLEX_ON_ADD_FILE, "0")
+        self.torrents.add("z")
+        watcher.step(300)
+        watcher.step(400)
+        self.assertEqual(self.refreshes, [])
+
+    def test_removing_a_torrent_scans_too(self):
+        watcher = h.PlexWatcher()
+        watcher.step(0)
+        self.torrents.discard("a")
+        watcher.step(10)
+        self.assertEqual(self.refreshes, [])
+        watcher.step(10 + h.PLEX_SCAN_DELAYS[0])
+        self.assertEqual(self.refreshes, ["3"])
 
     def test_a_torrserver_that_is_down_changes_nothing(self):
         watcher = h.PlexWatcher()
@@ -1671,7 +1727,7 @@ class PlexBlockTests(Base):
         card = card[:card.index("Authentication</span>")]
         self.assertIn("<summary>Using FUSE with Plex</summary>", card)
         self.assertNotIn("<details class=\"media-hint\" open", card)
-        for text in ("Scan the Plex library when a torrent is added", 'name="plex_url"', 'name="plex_token"',
+        for text in ("Scan automatically", 'name="plex_on_add"', 'name="plex_on_remove"', "Load libraries from Plex", 'name="plex_url"', 'name="plex_token"',
                      'name="plex_section"', "togglePlex()"):
             self.assertIn(text, card)
         self.assertEqual(page.count('type="password" name="plex_token"'), 1)

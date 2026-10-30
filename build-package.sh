@@ -194,9 +194,23 @@ make_spk() {
     cp -r src/conf/ "${spk_tmp_dir}"
     cp -r src/WIZARD_UIFILES "${spk_tmp_dir}"
 
-    ./src/INFO.sh "${PKG_VERSION}" "${ARCH}" "${pkg_size}" >"${spk_tmp_dir}/INFO"
+    ./src/INFO.sh "${PKG_VERSION}" "${ARCH}" "${pkg_size}" "$(package_changelog)" >"${spk_tmp_dir}/INFO"
 
     find "${spk_tmp_dir}" -mindepth 1 -maxdepth 1 -printf '%f\n' | tar -cf "${spk_dest_dir}/${spk_filename}" -C "${spk_tmp_dir}" -T /dev/stdin
+}
+
+# The short "what changed" text DSM shows next to the update button in Package
+# Center: the "<!-- package-center: ... -->" line under the CHANGELOG.md heading
+# of this version. Empty when there is none. Quotes, backslashes, backticks and
+# $ are dropped because the text goes into a quoted INFO field.
+package_changelog() {
+    [ -f CHANGELOG.md ] || return 0
+    awk -v version="${PKG_VERSION}" '
+        /^## / { if (found) exit; if ($2 == version) found = 1; next }
+        found && /^<!-- package-center:/ {
+            sub(/^<!-- package-center:[ ]*/, ""); sub(/[ ]*-->[ ]*$/, ""); print; exit
+        }
+    ' CHANGELOG.md | tr -d '"\\`$' | cut -c1-600
 }
 
 make_pkg() {
