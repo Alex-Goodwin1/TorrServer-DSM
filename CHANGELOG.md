@@ -8,6 +8,16 @@ short numbered list in English that DSM Package Center shows next to the update
 button (it goes into the `changelog` field of the package `INFO`; up to 600
 characters, no quotes). GitHub does not show it in the release notes.
 
+## 2.17.148 (2026-10-31)
+
+<!-- package-center: 1. Update to TorrServer MatriX.148. The package itself is unchanged. -->
+
+TorrServer updated from `MatriX.147.2` to `MatriX.148`.
+
+### Changed
+
+- **TorrServer:** updated to `MatriX.148`. The package itself is unchanged.
+
 ## 2.17.147.2 (2026-10-29)
 
 <!-- package-center: 1. Update to TorrServer MatriX.147.2. 2. Plex: pick libraries from a list loaded from Plex, scan automatically when a torrent is added or removed. 3. Fixed the 404 page in the Helper window after stopping and starting the package. 4. Package Center now shows what changed. -->
